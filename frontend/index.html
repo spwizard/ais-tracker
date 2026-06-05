@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+    <title>Maritime · Live Vessel Tracker</title>
+    <meta name="description" content="Real-time AIS vessel tracking" />
+    <script>
+      // Apply the theme before first paint to avoid a flash: an explicit saved
+      // choice wins, otherwise follow the OS prefers-color-scheme.
+      (function () {
+        try {
+          var t = localStorage.getItem("ais.theme.v2");
+          var dark =
+            t === "light" || t === "dark"
+              ? t === "dark"
+              : window.matchMedia("(prefers-color-scheme: dark)").matches;
+          document.documentElement.classList.toggle("dark", dark);
+        } catch (e) {
+          document.documentElement.classList.add("dark");
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

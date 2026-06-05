@@ -1,0 +1,110 @@
+"""Application configuration.
+
+All settings are read from environment variables (or a local ``.env`` file).
+The only required value is ``AISSTREAM_API_KEY``; everything else has a sensible
+default so the app boots with zero infra (in-memory store, UK/Channel bbox).
+
+List-shaped settings (``AIS_BBOX``, ``CORS_ORIGINS``) are stored as raw strings
+and exposed via parsed properties — this sidesteps pydantic-settings' eager
+JSON-decoding of complex env fields (which rejects values like ``*``).
+"""
+from __future__ import annotations
+
+import json
+from functools import lru_cache
+
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# AISStream expects bounding boxes as [[lat, lon], [lat, lon]] (SW corner, NE corner).
+# Default covers the UK and the English Channel — one of the busiest shipping regions.
+DEFAULT_BBOX = [[48.5, -8.0], [52.0, 2.5]]
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    # --- Sources -----------------------------------------------------------
+    enable_aisstream: bool = Field(default=True, alias="ENABLE_AISSTREAM")
+    enable_digitraffic: bool = Field(default=True, alias="ENABLE_DIGITRAFFIC")
+    digitraffic_host: str = Field(
+        default="meri.digitraffic.fi", alias="DIGITRAFFIC_HOST"
+    )
+    enable_kystverket: bool = Field(default=True, alias="ENABLE_KYSTVERKET")
+    kystverket_host: str = Field(default="153.44.253.27", alias="KYSTVERKET_HOST")
+    kystverket_port: int = Field(default=5631, alias="KYSTVERKET_PORT")
+
+    # --- AISStream ---------------------------------------------------------
+    aisstream_api_key: str = Field(default="", alias="AISSTREAM_API_KEY")
+    aisstream_url: str = Field(
+        default="wss://stream.aisstream.io/v0/stream", alias="AISSTREAM_URL"
+    )
+    # Bounding box(es) as JSON. A single box [[lat,lon],[lat,lon]] or a list of
+    # boxes [[[lat,lon],[lat,lon]], ...]. Parsed by the ``ais_bbox`` property.
+    ais_bbox_raw: str = Field(default=json.dumps(DEFAULT_BBOX), alias="AIS_BBOX")
+
+    # --- State store -------------------------------------------------------
+    # Blank => in-memory store. Set to redis://host:port/db to use Redis.
+    redis_url: str = Field(default="", alias="REDIS_URL")
+
+    # --- Behaviour ---------------------------------------------------------
+    vessel_ttl_sec: int = Field(default=600, alias="VESSEL_TTL_SEC")  # evict if silent 10m
+    trail_len: int = Field(default=200, alias="TRAIL_LEN")  # positions kept per vessel
+    broadcast_hz: float = Field(default=1.0, alias="BROADCAST_HZ")  # fan-out frequency
+
+    # --- Vessel registry (persistent MMSI -> static details) ---------------
+    enable_registry: bool = Field(default=True, alias="ENABLE_REGISTRY")
+    registry_path: str = Field(default="data/registry.sqlite", alias="REGISTRY_PATH")
+
+    # --- Ownership (Lloyd's) -----------------------------------------------
+    ownership_path: str = Field(default="data/ownership.sqlite", alias="OWNERSHIP_PATH")
+    sanctions_path: str = Field(default="data/sanctions.json", alias="SANCTIONS_PATH")
+
+    # --- LLM risk briefing -------------------------------------------------
+    briefing_model: str = Field(default="claude-opus-4-8", alias="BRIEFING_MODEL")
+    # Web open-source enrichment: Tavily does the search/scrape (cheap, fast),
+    # a small model turns the results into cited findings. Opt-in per request.
+    briefing_search_model: str = Field(default="claude-haiku-4-5", alias="BRIEFING_SEARCH_MODEL")
+    briefing_web_search: bool = Field(default=False, alias="BRIEFING_WEB_SEARCH")
+    tavily_api_key: str = Field(default="", alias="TAVILY_API_KEY")
+    anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
+
+    # --- Geofences ---------------------------------------------------------
+    geofence_path: str = Field(default="data/geofences.json", alias="GEOFENCE_PATH")
+    geofence_eval_sec: float = Field(default=2.0, alias="GEOFENCE_EVAL_SEC")
+
+    # --- Risk engine -------------------------------------------------------
+    risk_eval_sec: float = Field(default=20.0, alias="RISK_EVAL_SEC")
+    risk_teleport_kn: float = Field(default=70.0, alias="RISK_TELEPORT_KN")
+    risk_rendezvous_slow_kn: float = Field(default=5.0, alias="RISK_RDV_SLOW_KN")
+    risk_rendezvous_nm: float = Field(default=0.5, alias="RISK_RDV_NM")
+    risk_rendezvous_min: float = Field(default=20.0, alias="RISK_RDV_MIN")
+
+    # --- HTTP / CORS -------------------------------------------------------
+    # Comma-separated list, a JSON array, or ``*``.
+    cors_origins_raw: str = Field(default="*", alias="CORS_ORIGINS")
+
+    @property
+    def ais_bbox(self) -> list:
+        """Normalised list of bounding boxes for the AISStream subscription."""
+        v = json.loads(self.ais_bbox_raw)
+        # Allow a single box [[lat,lon],[lat,lon]] -> wrap into a list of boxes.
+        if v and isinstance(v[0][0], (int, float)):
+            v = [v]
+        return v
+
+    @property
+    def cors_origins(self) -> list[str]:
+        v = self.cors_origins_raw.strip()
+        if v.startswith("["):
+            return json.loads(v)
+        return [o.strip() for o in v.split(",") if o.strip()]
+
+    @property
+    def use_redis(self) -> bool:
+        return bool(self.redis_url)
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()

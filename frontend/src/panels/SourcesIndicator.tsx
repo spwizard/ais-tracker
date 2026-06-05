@@ -1,0 +1,76 @@
+import { Antenna } from "lucide-react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
+import type { SourceStatus } from "@/types";
+
+const SOURCE_LABELS: Record<string, string> = {
+  aisstream: "AISStream · UK/Channel",
+  digitraffic: "Digitraffic · Baltic",
+  kystverket: "Kystverket · Norway",
+};
+
+/** Compact multi-source health pill with a per-source breakdown on hover. */
+export function SourcesIndicator({ sources }: { sources: SourceStatus[] }) {
+  if (sources.length === 0) return null;
+  const up = sources.filter((s) => s.connected).length;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          aria-label="Live sources"
+          className="flex items-center gap-1.5 rounded-lg px-1.5 py-1 transition-colors hover:bg-foreground/10"
+        >
+          <Antenna className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="text-xs font-medium tabular-nums">{up}</span>
+          <div className="flex gap-0.5">
+            {sources.map((s) => (
+              <span
+                key={s.name}
+                className={cn(
+                  "h-1.5 w-1.5 rounded-full",
+                  s.connected ? "bg-emerald-400" : "bg-rose-500",
+                )}
+              />
+            ))}
+          </div>
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" className="w-56 p-0">
+        <div className="px-3 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+          {up} of {sources.length} live sources
+        </div>
+        <div className="space-y-0.5 px-1.5 pb-2">
+          {sources.map((s) => (
+            <div
+              key={s.name}
+              className="flex items-center gap-2 rounded-md px-1.5 py-1"
+            >
+              <span className="relative flex h-2 w-2">
+                {s.connected && (
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
+                )}
+                <span
+                  className={cn(
+                    "inline-flex h-2 w-2 rounded-full",
+                    s.connected ? "bg-emerald-400" : "bg-rose-500",
+                  )}
+                />
+              </span>
+              <span className="flex-1 truncate text-xs">
+                {SOURCE_LABELS[s.name] ?? s.name}
+              </span>
+              <span className="tabular-nums text-[11px] text-muted-foreground">
+                {s.messages_seen.toLocaleString()}
+              </span>
+            </div>
+          ))}
+        </div>
+      </TooltipContent>
+    </Tooltip>
+  );
+}

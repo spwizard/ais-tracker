@@ -1,0 +1,39 @@
+# By default this starts ONLY Redis — the app runs fine without it (in-memory
+# store), but Redis adds persistence, geo queries and a path to multi-instance
+# fan-out. Start it with:
+#
+#     docker compose up -d redis
+#     # then point the backend at it:  REDIS_URL=redis://localhost:6379/0
+#
+# To also run the backend in a container (reads backend/.env), use the profile:
+#
+#     docker compose --profile full up --build
+#
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--save", "60", "1", "--appendonly", "no"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    profiles: ["full"]
+    build: ./backend
+    env_file: ./backend/.env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+
+volumes:
+  redis-data:

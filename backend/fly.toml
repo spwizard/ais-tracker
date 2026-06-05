@@ -1,0 +1,45 @@
+# Fly.io config for the AIS tracker backend.
+# A SINGLE always-on instance: it holds one upstream AIS connection + in-memory
+# state and fans out over WebSocket. Do not scale beyond 1 machine until the
+# Redis pub/sub fan-out is added (`fly scale count 1`).
+app = "ais-tracker"          # change to your app name
+primary_region = "lhr"       # London — close to the default UK/Channel AIS bbox
+
+[build]
+
+# Data paths point at the persistent volume (registry + geofences survive
+# restarts; ownership.sqlite + sanctions.json are uploaded there once).
+[env]
+  OWNERSHIP_PATH = "/app/data/ownership.sqlite"
+  SANCTIONS_PATH = "/app/data/sanctions.json"
+  REGISTRY_PATH = "/app/data/registry.sqlite"
+  GEOFENCE_PATH = "/app/data/geofences.json"
+  BRIEFING_WEB_SEARCH = "false"   # opt-in per request via the UI checkbox
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = false      # keep the AIS feed alive — never suspend
+  auto_start_machines = true
+  min_machines_running = 1
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 1000
+    soft_limit = 800
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"
+
+[mounts]
+  source = "ais_data"
+  destination = "/app/data"
+
+[checks]
+  [checks.health]
+    type = "http"
+    port = 8000
+    path = "/healthz"
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "25s"
