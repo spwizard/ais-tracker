@@ -73,6 +73,12 @@ and persist across restarts.
 
 ## Notes & gotchas
 
+- **Port alignment.** Fly's proxy only reaches the app when `http_service.internal_port`,
+  `[env] PORT`, and the uvicorn `--port` all match (default **8000**). A `[PC01]` /
+  `[PR03]` error naming `0.0.0.0:8080` means the live Fly config still expects 8080
+  (common after `fly launch`) while the container listens elsewhere — run
+  `fly config show` and redeploy, or set `internal_port`, `PORT`, and the Dockerfile
+  to the same value.
 - **Single instance.** `min_machines_running = 1`, `auto_stop_machines = false`
   (the AIS feed must stay alive). `fly scale count 1`.
 - **Memory.** 1 GB is comfortable for ~5k vessels; bump in `fly.toml` if it OOMs.

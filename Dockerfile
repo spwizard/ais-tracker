@@ -26,4 +26,5 @@ RUN mkdir -p /app/data
 EXPOSE 8000
 # Single worker on purpose — the app holds ONE upstream AIS connection and fans
 # out from in-memory state. Multiple workers would each open their own feed.
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# PORT must match fly.toml http_service.internal_port (Fly proxy connects there).
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

@@ -10,6 +10,7 @@ primary_region = "lhr"       # London — close to the default UK/Channel AIS bb
 # Data paths point at the persistent volume (registry + geofences survive
 # restarts; ownership.sqlite + sanctions.json are uploaded/built there once).
 [env]
+  PORT = "8000"                 # must match http_service.internal_port below
   OWNERSHIP_PATH = "/app/data/ownership.sqlite"
   SANCTIONS_PATH = "/app/data/sanctions.json"
   REGISTRY_PATH = "/app/data/registry.sqlite"
