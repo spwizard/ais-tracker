@@ -18,10 +18,12 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from .config import get_settings
 from .flags import get_flags
@@ -372,3 +374,12 @@ async def ws_endpoint(ws: WebSocket):
         pass
     finally:
         broadcaster.disconnect(ws)
+
+
+# Serve the built frontend (single-app deploy). Mounted LAST so /api, /ws,
+# /healthz and the docs win; everything else falls through to the SPA. Absent in
+# local dev (the Vite dev server serves the UI) — guarded so the API still runs.
+_static_dir = os.environ.get("STATIC_DIR", "static")
+if os.path.isdir(_static_dir):
+    app.mount("/", StaticFiles(directory=_static_dir, html=True), name="frontend")
+    log.info("serving frontend from %s", _static_dir)

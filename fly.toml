@@ -1,14 +1,14 @@
-# Fly.io config for the AIS tracker backend.
+# Fly.io config — ONE app serving both the API/WebSocket and the built frontend.
 # A SINGLE always-on instance: it holds one upstream AIS connection + in-memory
 # state and fans out over WebSocket. Do not scale beyond 1 machine until the
 # Redis pub/sub fan-out is added (`fly scale count 1`).
-app = "ais-tracker"          # change to your app name
+app = "ais-tracker"          # change to your app name (and frontend/.env.production)
 primary_region = "lhr"       # London — close to the default UK/Channel AIS bbox
 
 [build]
 
 # Data paths point at the persistent volume (registry + geofences survive
-# restarts; ownership.sqlite + sanctions.json are uploaded there once).
+# restarts; ownership.sqlite + sanctions.json are uploaded/built there once).
 [env]
   OWNERSHIP_PATH = "/app/data/ownership.sqlite"
   SANCTIONS_PATH = "/app/data/sanctions.json"
