@@ -84,6 +84,23 @@ async def _risk_loop(app: FastAPI) -> None:
             log.warning("risk evaluation failed: %s", exc)
 
 
+async def _bootstrap_sanctions(app: FastAPI) -> None:
+    """Download OFAC SDN sanctions onto the volume when missing (Fly first boot)."""
+    settings = app.state.settings
+    path = settings.sanctions_path
+    if os.path.isfile(path):
+        return
+    log.info("sanctions missing at %s — bootstrapping from OpenSanctions", path)
+    try:
+        from scripts.import_sanctions import DEFAULT_URL, build_sanctions_file
+
+        await asyncio.to_thread(build_sanctions_file, DEFAULT_URL, path)
+        app.state.sanctions.reload()
+        log.info("sanctions bootstrap complete")
+    except Exception as exc:  # noqa: BLE001
+        log.warning("sanctions bootstrap failed: %s", exc)
+
+
 async def _registry_flush(app: FastAPI) -> None:
     """Periodically persist newly-learned vessel identities to SQLite."""
     while True:
@@ -159,6 +176,7 @@ async def lifespan(app: FastAPI):
         if registry is not None
         else None
     )
+    sanctions_task = asyncio.create_task(_bootstrap_sanctions(app), name="sanctions-bootstrap")
 
     log.info(
         "ready — store=%s, sources=%s",
@@ -181,6 +199,9 @@ async def lifespan(app: FastAPI):
             registry_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await registry_task
+        sanctions_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await sanctions_task
         for src in sources:
             await src.stop()
         if registry is not None:
@@ -201,21 +222,30 @@ app.add_middleware(
 )
 
 
+def _source_status(src) -> dict:
+    return {
+        "name": src.name,
+        "connected": src.connected,
+        "configured": src.configured,
+        "messages_seen": src.messages_seen,
+    }
+
+
 @app.get("/healthz")
 async def healthz():
+    settings = app.state.settings
     return {
         "status": "ok",
-        "sources": [
-            {
-                "name": s.name,
-                "connected": s.connected,
-                "messages_seen": s.messages_seen,
-            }
-            for s in app.state.sources
-        ],
+        "sources": [_source_status(s) for s in app.state.sources],
         "vessels": await app.state.store.count(),
         "clients": app.state.broadcaster.client_count,
         "registry": app.state.registry.count() if app.state.registry else 0,
+        "data": {
+            "aisstream_key_set": bool(settings.aisstream_api_key),
+            "sanctions_loaded": app.state.sanctions.loaded,
+            "ownership_loaded": app.state.ownership.available,
+            "briefing_ready": bool(settings.anthropic_api_key),
+        },
     }
 
 
@@ -226,16 +256,7 @@ async def feature_flags():
 
 @app.get("/api/sources")
 async def list_sources():
-    return {
-        "sources": [
-            {
-                "name": s.name,
-                "connected": s.connected,
-                "messages_seen": s.messages_seen,
-            }
-            for s in app.state.sources
-        ]
-    }
+    return {"sources": [_source_status(s) for s in app.state.sources]}
 
 
 @app.get("/api/meta")

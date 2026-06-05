@@ -30,7 +30,8 @@ fly apps create your-name
 # Persistent volume for data/ (registry + geofences + ownership.sqlite).
 fly volumes create ais_data --region lhr --size 1
 
-# Secrets — never committed.
+# Secrets — never committed. AISSTREAM_API_KEY is **required** for the UK/Channel
+# feed; without it the AISStream source stays idle (amber in the UI).
 fly secrets set \
   AISSTREAM_API_KEY=xxxxxxxx \
   ANTHROPIC_API_KEY=sk-ant-xxxx \
@@ -73,6 +74,15 @@ and persist across restarts.
 
 ## Notes & gotchas
 
+- **AISStream not starting (amber “API key not set”).** The UK/Channel feed needs
+  `AISSTREAM_API_KEY` as a Fly secret — it is not in `fly.toml`. After setting it,
+  `fly apps restart your-name`. Check `fly logs` for `aisstream connected` or
+  `AISSTREAM_API_KEY not set`.
+- **Risk features empty.** Sanctions screening auto-downloads on first boot (OFAC via
+  OpenSanctions). Lloyd's **ownership** still requires uploading
+  `ownership.sqlite` to the volume (licensed data). The AI briefing needs
+  `ANTHROPIC_API_KEY`. `GET /healthz` reports `data.sanctions_loaded`,
+  `data.ownership_loaded`, and `data.briefing_ready`.
 - **Port alignment.** Fly's proxy only reaches the app when `http_service.internal_port`,
   `[env] PORT`, and the uvicorn `--port` all match (default **8000**). A `[PC01]` /
   `[PR03]` error naming `0.0.0.0:8080` means the live Fly config still expects 8080

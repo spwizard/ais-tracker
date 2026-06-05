@@ -29,7 +29,16 @@ class SanctionsStore:
         self._entities: set[str] = set()
         self.loaded = False
 
+    def _reset(self) -> None:
+        self._by_imo.clear()
+        self._by_mmsi.clear()
+        self._by_callsign.clear()
+        self._vessel_names.clear()
+        self._entities.clear()
+        self.loaded = False
+
     def open(self) -> None:
+        self._reset()
         try:
             with open(self._path, encoding="utf-8") as f:
                 data = json.load(f)
@@ -50,6 +59,10 @@ class SanctionsStore:
         log.info(
             "sanctions loaded: %d vessels, %d entities", len(data.get("vessels", [])), len(self._entities)
         )
+
+    def reload(self) -> None:
+        """Re-read the sanctions file from disk (e.g. after a bootstrap download)."""
+        self.open()
 
     def screen_vessel(
         self, imo=None, mmsi=None, name=None, callsign=None, by_name: bool = True

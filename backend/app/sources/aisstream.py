@@ -22,6 +22,10 @@ class AisStreamSource(Source):
         self._settings = settings
 
     @property
+    def configured(self) -> bool:
+        return bool(self._settings.aisstream_api_key)
+
+    @property
     def subscription(self) -> dict:
         return {
             "APIKey": self._settings.aisstream_api_key,

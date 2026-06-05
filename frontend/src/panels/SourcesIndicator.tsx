@@ -14,6 +14,16 @@ const SOURCE_LABELS: Record<string, string> = {
 };
 
 /** Compact multi-source health pill with a per-source breakdown on hover. */
+function sourceDotClass(s: SourceStatus): string {
+  if (s.configured === false) return "bg-amber-400";
+  return s.connected ? "bg-emerald-400" : "bg-rose-500";
+}
+
+function sourceDetail(s: SourceStatus): string {
+  if (s.configured === false) return "API key not set";
+  return s.connected ? "Live" : "Disconnected";
+}
+
 export function SourcesIndicator({ sources }: { sources: SourceStatus[] }) {
   if (sources.length === 0) return null;
   const up = sources.filter((s) => s.connected).length;
@@ -31,10 +41,7 @@ export function SourcesIndicator({ sources }: { sources: SourceStatus[] }) {
             {sources.map((s) => (
               <span
                 key={s.name}
-                className={cn(
-                  "h-1.5 w-1.5 rounded-full",
-                  s.connected ? "bg-emerald-400" : "bg-rose-500",
-                )}
+                className={cn("h-1.5 w-1.5 rounded-full", sourceDotClass(s))}
               />
             ))}
           </div>
@@ -55,15 +62,19 @@ export function SourcesIndicator({ sources }: { sources: SourceStatus[] }) {
                   <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
                 )}
                 <span
-                  className={cn(
-                    "inline-flex h-2 w-2 rounded-full",
-                    s.connected ? "bg-emerald-400" : "bg-rose-500",
-                  )}
+                  className={cn("inline-flex h-2 w-2 rounded-full", sourceDotClass(s))}
                 />
               </span>
-              <span className="flex-1 truncate text-xs">
-                {SOURCE_LABELS[s.name] ?? s.name}
-              </span>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-xs">
+                  {SOURCE_LABELS[s.name] ?? s.name}
+                </div>
+                {s.configured === false && (
+                  <div className="text-[10px] text-amber-400/90">
+                    {sourceDetail(s)}
+                  </div>
+                )}
+              </div>
               <span className="tabular-nums text-[11px] text-muted-foreground">
                 {s.messages_seen.toLocaleString()}
               </span>

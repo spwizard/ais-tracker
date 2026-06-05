@@ -28,6 +28,11 @@ class Source(ABC):
         self.connected = False
         self.messages_seen = 0
 
+    @property
+    def configured(self) -> bool:
+        """False when required credentials/config are missing (source stays idle)."""
+        return True
+
     def start(self) -> None:
         self._stop.clear()
         self._task = asyncio.create_task(self._supervise(), name=f"src-{self.name}")

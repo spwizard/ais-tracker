@@ -189,5 +189,7 @@ export type ConnectionStatus = "connecting" | "open" | "closed";
 export interface SourceStatus {
   name: string;
   connected: boolean;
+  /** False when required credentials are missing (e.g. AISStream API key). */
+  configured?: boolean;
   messages_seen: number;
 }

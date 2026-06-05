@@ -40,7 +40,7 @@ def _lines(source: str):
             yield from f
 
 
-def main(source: str, out: str) -> None:
+def build_sanctions_file(source: str, out: str) -> None:
     vessels, entity_names = [], set()
     for line in _lines(source):
         line = line.strip()
@@ -76,6 +76,10 @@ def main(source: str, out: str) -> None:
             f,
         )
     print(f"sanctions: {len(vessels)} vessels, {len(entity_names)} entities → {out}")
+
+
+def main(source: str, out: str) -> None:
+    build_sanctions_file(source, out)
 
 
 if __name__ == "__main__":
