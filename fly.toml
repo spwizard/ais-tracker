@@ -20,9 +20,14 @@ primary_region = "lhr"       # London — close to the default UK/Channel AIS bb
 [http_service]
   internal_port = 8000
   force_https = true
-  auto_stop_machines = false      # keep the AIS feed alive — never suspend
+  # Portfolio demo: sleep when idle, wake on the next visit. Near-zero cost —
+  # you only pay while someone is actually viewing it. Trade-off: on a cold
+  # visit the map is empty for ~30-60s while the AIS feed reconnects and fills.
+  # (For 24/7 data collection, set auto_stop_machines = "off" + min = 1 — but
+  #  that's the ~$5/mo always-on bill.)
+  auto_stop_machines = "stop"
   auto_start_machines = true
-  min_machines_running = 1
+  min_machines_running = 0
   [http_service.concurrency]
     type = "connections"
     hard_limit = 1000
@@ -30,7 +35,7 @@ primary_region = "lhr"       # London — close to the default UK/Channel AIS bb
 
 [[vm]]
   size = "shared-cpu-1x"
-  memory = "1gb"
+  memory = "512mb"                 # cheaper; bump back to 1gb only if it OOMs
 
 [mounts]
   source = "ais_data"
