@@ -1,144 +1,178 @@
 # Deploying on Oracle Cloud — Always Free (24/7, $0)
 
-Oracle Cloud's **Always Free** tier includes an **Ampere A1 (ARM)** VM — up to
-4 cores / 24 GB RAM, free forever. That's far more than this app needs, so it can
-run **always-on** (feed always connected, registry always growing) at **no cost** —
-unlike Fly's scale-to-zero. The trade-off is more setup and the ARM capacity quirk
-below.
+Oracle Cloud's **Always Free** tier runs this app **always-on for $0** — the feed
+stays connected, the registry keeps growing, background detection keeps running.
 
-The app still runs as **one instance** (single upstream AIS feed + in-memory
-fan-out). Don't run two.
+This guide reflects the **native** deployment that's actually running (uvicorn +
+systemd), not Docker. The free VMs are small (the AMD micro is **1 GB RAM**), and
+a Docker image build — which runs `npm`/Vite in-box — OOMs on that. So we build
+the frontend **on your laptop** and run the backend natively on the box; `pip
+install` is light and fast. (On a big ARM A1 instance, the Docker path in the root
+`Dockerfile` works too — but native is simplest and proven.)
 
-Architecture: one VM running the app in Docker (the repo's multi-stage image
-builds the frontend + backend), with **Caddy** in front for automatic HTTPS.
+The app runs as **one instance** (single upstream AIS feed + in-memory fan-out).
+Don't run two.
 
 ```
-Internet ──443──▶ Caddy (auto Let's Encrypt) ──▶ localhost:8000 (app container)
-                                                       └─ /app/data volume (registry, geofences, ownership.sqlite)
+Internet ──80/443──▶ uvicorn (:80, serves API + WS + bundled frontend)
+                          └─ backend/data/  (registry, geofences, sanctions, ownership.sqlite)
 ```
 
 ---
 
 ## 1. Create the VM
 
-In the [Oracle Cloud console](https://cloud.oracle.com): **Compute → Instances → Create**.
+[OCI console](https://cloud.oracle.com) → **Compute → Instances → Create**:
 
-- **Image:** Canonical **Ubuntu 24.04** (or 22.04).
-- **Shape:** change to **Ampere → VM.Standard.A1.Flex**, set **2 OCPU / 8 GB**
-  (well within Always Free). Confirm the shape shows **"Always Free-eligible."**
+- **Image:** Canonical **Ubuntu 22.04**.
+- **Shape:** the Always-Free **`VM.Standard.E2.1.Micro`** (AMD, 1 GB) works.
+  Prefer **Ampere A1 (ARM)** for more headroom if you can get capacity.
 - **SSH:** upload your public key (`~/.ssh/id_ed25519.pub`).
-- Create. Note the **public IP**.
+- **Networking:** *Create new VCN* + *Create new public subnet*, and tick
+  **"Assign a public IPv4 address."**
 
-> ⚠️ **ARM capacity.** Popular regions often return *"Out of capacity"* for A1.
-> If so: try a different **Availability Domain**, retry over a few hours, or pick
-> a less busy region (your tenancy's **home region** usually works best). A small
-> script that retries the create call is a known workaround.
-
----
-
-## 2. Open the firewall (two layers — both required)
-
-Oracle blocks ports at **two** levels; you must open both or 80/443 stay closed.
-
-**a) Cloud security list** — VCN → your subnet → Security List → add **Ingress**
-rules (Source `0.0.0.0/0`): TCP **80** and TCP **443**. (22 is already open.)
-
-**b) The instance's own iptables** — Oracle's Ubuntu image ships with a
-restrictive firewall. SSH in and open 80/443:
-
-```bash
-ssh ubuntu@YOUR_IP
-
-sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 80 -j ACCEPT
-sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 443 -j ACCEPT
-sudo netfilter-persistent save          # persist across reboots
-```
+> ⚠️ **ARM "out of capacity":** A1 is often unavailable — retry, switch
+> availability domain, or just use the AMD micro (this guide's path).
 
 ---
 
-## 3. Install Docker + Caddy
+## 2. Make it reachable (the parts that trip everyone up)
 
-```bash
-# Docker
-curl -fsSL https://get.docker.com | sudo sh
-sudo usermod -aG docker ubuntu && newgrp docker
+A public IP needs **three** things, and there are **two firewalls**.
 
-# Caddy (arm64 package, auto-HTTPS reverse proxy)
-sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
-sudo apt update && sudo apt install -y caddy
-```
+**a) Public IP** — if the instance shows no public IP: instance → **Networking** →
+primary VNIC → **IPv4 Addresses** → edit the private-IP row → assign an
+**ephemeral public IPv4 address**.
 
----
+**b) Internet gateway + route** — on the instance's networking quick-actions, run
+**"Connect public subnet to internet"** (creates the gateway + a `0.0.0.0/0`
+route). Verify under VCN → Routing → Default Route Table that
+`0.0.0.0/0 → Internet Gateway` exists.
 
-## 4. Get the app + data + secrets onto the box
+**c) OCI Security List ingress** — VCN → **Security** (or Subnets → your subnet) →
+**Default Security List → Add Ingress Rules**: Source `0.0.0.0/0`, TCP, ports
+**22**, **80**, **443**. (22 is usually pre-added; 80/443 are not.)
 
-```bash
-sudo mkdir -p /opt/ais/data && sudo chown -R ubuntu:ubuntu /opt/ais
-cd /opt/ais
-
-# Code (private repo → use a GitHub PAT or deploy key):
-git clone https://github.com/spwizard/ais-tracker.git
-# (or: scp -r from your laptop, excluding node_modules/.venv/data)
-```
-
-**Secrets** — create `/opt/ais/ais-tracker/backend/.env` (never committed):
-
-```bash
-cat > /opt/ais/ais-tracker/backend/.env <<'EOF'
-AISSTREAM_API_KEY=xxxxxxxx
-ANTHROPIC_API_KEY=sk-ant-xxxx
-TAVILY_API_KEY=tvly-xxxx
-BRIEFING_WEB_SEARCH=false
-EOF
-```
-
-**Data** — copy your licensed Lloyd's DB up from your laptop (sanctions.json
-auto-downloads on first boot; registry + geofences self-create):
-
-```bash
-# from your laptop:
-scp backend/data/ownership.sqlite ubuntu@YOUR_IP:/opt/ais/data/ownership.sqlite
-```
-
-The container's data paths default to `/app/data/*`, which is the mounted volume —
-no path env vars needed.
+**d) In-VM iptables** — Oracle's Ubuntu image has a `REJECT` rule that blocks
+everything after SSH. The catch: **your ACCEPT rules must go ABOVE that REJECT.**
+`sudo iptables -I INPUT 6 …` lands *below* it and silently does nothing. After SSH
+(step 3), see the iptables block in step 5.
 
 ---
 
-## 5. Build + run (always-on)
+## 3. From your laptop: build + ship
 
-The multi-stage image builds cleanly on ARM (all Python deps have aarch64 wheels):
+In the repo root, build the frontend and push code + build + secrets + data to the
+box (replace the IP with yours):
 
 ```bash
+IP=140.238.76.193
+
+# 1. build the frontend locally (fast on your machine)
+( cd frontend && npm run build )
+
+# 2. prep the box
+ssh ubuntu@$IP 'sudo apt-get update -qq && sudo apt-get install -y -qq python3-venv python3-pip rsync && sudo mkdir -p /opt/ais/ais-tracker/{backend/data,frontend/dist} && sudo chown -R ubuntu:ubuntu /opt/ais'
+
+# 3. push code (incl. backend/.env with your keys), built UI, and the licensed DB
+rsync -az --delete --exclude '.venv' --exclude '__pycache__' --exclude 'data' --exclude '*.pyc' \
+  backend/ ubuntu@$IP:/opt/ais/ais-tracker/backend/
+rsync -az --delete frontend/dist/ ubuntu@$IP:/opt/ais/ais-tracker/frontend/dist/
+scp backend/data/ownership.sqlite ubuntu@$IP:/opt/ais/ais-tracker/backend/data/ownership.sqlite
+```
+
+> `backend/.env` (your `AISSTREAM_API_KEY`, `ANTHROPIC_API_KEY`, `TAVILY_API_KEY`)
+> is gitignored but present locally, so rsync ships it to the box. **sanctions.json
+> auto-downloads on first boot**; registry + geofences self-create.
+
+---
+
+## 4. On the box: venv + deps
+
+```bash
+ssh ubuntu@$IP
 cd /opt/ais/ais-tracker
-docker build -t ais-tracker .
-
-docker run -d --name ais --restart unless-stopped \
-  -p 127.0.0.1:8000:8000 \
-  --env-file backend/.env \
-  -v /opt/ais/data:/app/data \
-  ais-tracker
+python3 -m venv .venv
+.venv/bin/pip install -q --upgrade pip
+.venv/bin/pip install -q -r backend/requirements.txt
 ```
 
-- `-p 127.0.0.1:8000:8000` keeps the app private; **Caddy** is the public face.
-- `--restart unless-stopped` survives reboots/crashes.
-- Check it: `docker logs -f ais` → look for `aisstream connected`, then
-  `curl localhost:8000/healthz`.
+(`shapely`, `pydantic-core`, etc. all install from x86_64 wheels — quick, low memory.)
 
 ---
 
-## 6. HTTPS with Caddy
+## 5. Firewall (iptables) + systemd service
 
-HTTPS matters here: when the page is served over `https`, the frontend opens the
-WebSocket over `wss://` (same origin) — so TLS makes the live feed work.
-
-Point a domain's **A record** at `YOUR_IP`. No domain? A free
-[DuckDNS](https://www.duckdns.org) subdomain works (`yourname.duckdns.org`).
+Open 80/443 **above** the REJECT rule, then install the service (uvicorn binds
+:80 directly via `CAP_NET_BIND_SERVICE` — no Caddy needed for HTTP):
 
 ```bash
-sudo tee /etc/caddy/Caddyfile <<'EOF'
+# open 80/443 ABOVE the REJECT (find its line: `sudo iptables -L INPUT --line-numbers`)
+sudo iptables -I INPUT 5 -m state --state NEW -p tcp --dport 80 -j ACCEPT
+sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 443 -j ACCEPT
+echo "iptables-persistent iptables-persistent/autosave_v4 boolean true" | sudo debconf-set-selections
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq iptables-persistent
+sudo netfilter-persistent save
+
+# systemd unit
+sudo tee /etc/systemd/system/ais.service >/dev/null <<'EOF'
+[Unit]
+Description=AIS Tracker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/ais/ais-tracker/backend
+Environment=STATIC_DIR=/opt/ais/ais-tracker/frontend/dist
+ExecStart=/opt/ais/ais-tracker/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 80
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+sudo systemctl daemon-reload
+sudo systemctl enable --now ais
+
+# check
+systemctl is-active ais
+curl -s http://localhost/healthz
+```
+
+The app reads `backend/.env` via pydantic (CWD = `WorkingDirectory`), so no
+`EnvironmentFile` is needed. Visit **http://YOUR_IP** — the full tracker loads.
+
+---
+
+## 6. Updating (day-to-day) — `deploy.sh`
+
+From the repo root on your laptop:
+
+```bash
+./deploy.sh                    # default host
+./deploy.sh ubuntu@1.2.3.4     # override
+```
+
+It rebuilds the frontend, rsyncs **code + build only** (never your `.env` or
+`data/`), refreshes deps, and restarts the service — then prints the live vessel
+count. One command, ~15s.
+
+---
+
+## 7. HTTPS (optional)
+
+HTTP is fully functional (the live feed runs over same-origin `ws://`), but for a
+padlock + a real URL, point a domain — or a free
+[DuckDNS](https://www.duckdns.org) subdomain — at the IP, then put **Caddy** in
+front (move uvicorn back to `:8000` first — drop `--port 80` to `--port 8000` and
+the `CAP_NET_BIND_SERVICE` line):
+
+```bash
+sudo apt install -y caddy
+sudo tee /etc/caddy/Caddyfile >/dev/null <<'EOF'
 yourname.duckdns.org {
     reverse_proxy localhost:8000
 }
@@ -146,35 +180,16 @@ EOF
 sudo systemctl restart caddy
 ```
 
-Caddy auto-provisions a Let's Encrypt cert and **passes WebSocket upgrades
-through** to `/ws`. Visit `https://yourname.duckdns.org` — the full app loads,
-API + live feed on the same origin.
-
----
-
-## 7. Updating / ops
-
-```bash
-cd /opt/ais/ais-tracker && git pull
-docker build -t ais-tracker . && docker rm -f ais
-docker run -d --name ais --restart unless-stopped \
-  -p 127.0.0.1:8000:8000 --env-file backend/.env -v /opt/ais/data:/app/data ais-tracker
-
-docker logs -f ais          # logs
-docker stats ais            # memory/CPU (expect a few hundred MB)
-```
+Caddy auto-provisions a Let's Encrypt cert and passes the WebSocket through.
 
 ---
 
 ## Notes
 
-- **Single instance.** One container, one upstream AIS feed. Don't run two.
-- **Memory.** With 8 GB there's no OOM concern (vs the 512 MB Fly squeeze) — the
-  in-memory registry mirror + ~5k vessels sit comfortably.
-- **Lloyd's licensing.** `ownership.sqlite` lives only on the box's volume — never
-  in git or a public image. (You chose a private deploy for this reason.)
-- **Egress.** Always Free includes 10 TB/mo outbound — irrelevant for this.
-- **Cost.** $0 on Always Free. Set the tenancy to **"Always Free resources only"**
-  (or just don't create paid resources) so it can never bill you.
-- **LLM cost is separate** — Anthropic + Tavily only spend when you click Generate;
-  unrelated to hosting.
+- **Single instance.** One service, one upstream feed. Don't run two.
+- **Reboots** are handled — `ais` is enabled and iptables rules are persisted.
+- **Lloyd's licensing.** `ownership.sqlite` lives only on the box — never in git or
+  a public image.
+- **LLM cost is separate** — Anthropic + Tavily only spend when you click Generate.
+- **$0** on Always Free; set the tenancy to *"Always Free resources only"* so it
+  can't bill you.
