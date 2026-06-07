@@ -550,19 +550,17 @@ const RISK_STYLE: Record<RiskLevel, { ring: string; text: string; dot: string }>
   critical: { ring: "border-rose-500/50 bg-rose-500/10", text: "text-rose-400", dot: "bg-rose-400" },
 };
 
-/** Composite, cited risk assessment (sanctions + ownership + behaviour). */
+/** Deterministic risk signals. The overall level/score already lives in the
+ *  header pill, so this shows only the signals behind it. */
 function RiskBanner({ risk }: { risk: RiskAssessment }) {
   const s = RISK_STYLE[risk.level];
   return (
     <div className={cn("space-y-1.5 rounded-lg border p-2.5", s.ring)}>
-      <div className="flex items-center gap-2">
-        <ShieldAlert className={cn("h-4 w-4", s.text)} />
-        <span className="text-xs font-semibold uppercase tracking-wide">
-          <span className={s.text}>{risk.level}</span> risk
-        </span>
-        <span className={cn("ml-auto text-sm font-bold tabular-nums", s.text)}>
-          {risk.score}
-          <span className="text-[10px] font-normal text-muted-foreground">/100</span>
+      <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+        <ShieldAlert className={cn("h-3 w-3", s.text)} />
+        Risk signals
+        <span className="ml-auto normal-case tracking-normal text-muted-foreground/50">
+          deterministic
         </span>
       </div>
       <ul className="space-y-0.5">
