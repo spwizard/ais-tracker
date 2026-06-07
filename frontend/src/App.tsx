@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVesselsSocket } from "@/hooks/useVesselsSocket";
 import { usePanels, type PanelId } from "@/hooks/usePanels";
 import { useTheme } from "@/hooks/useTheme";
@@ -67,6 +67,10 @@ export default function App() {
     },
     [fetchBucket],
   );
+  // Leaving density mode snaps back to live (and hides the timeline).
+  useEffect(() => {
+    if (!densityMode) setDensityOverride(null);
+  }, [densityMode]);
   const [showSelectedTrack, setShowSelectedTrack] = useState(false);
   const mapRef = useRef<MapHandle>(null);
 
@@ -417,7 +421,9 @@ export default function App() {
 
         <AlertToasts alerts={toastAlerts} onClick={onEventClick} />
 
-        <DensityTimeline buckets={buckets} onSelect={onTimelineSelect} />
+        {densityMode && (
+          <DensityTimeline buckets={buckets} onSelect={onTimelineSelect} />
+        )}
       </div>
 
       {networkMmsi != null && (
