@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useVesselsSocket } from "@/hooks/useVesselsSocket";
 import { usePanels, type PanelId } from "@/hooks/usePanels";
 import { useTheme } from "@/hooks/useTheme";
@@ -15,6 +15,9 @@ import { ZonesPanel } from "@/panels/ZonesPanel";
 import { DrawToolbar } from "@/panels/DrawToolbar";
 import { AlertToasts, type ToastAlert } from "@/panels/AlertToasts";
 import { OwnershipGraph } from "@/panels/OwnershipGraph";
+import { DensityTimeline } from "@/panels/DensityTimeline";
+import { useDensity } from "@/hooks/useDensity";
+import type { DensityPoint } from "@/types";
 import { useGeofences } from "@/hooks/useGeofences";
 import type { DrawResult } from "@/hooks/useGeofenceDraw";
 import { containsPoint } from "@/geofence/geometry";
@@ -50,6 +53,20 @@ export default function App() {
   const [is3D, setIs3D] = useState(false);
   const [selectedMmsi, setSelectedMmsi] = useState<number | null>(null);
   const [networkMmsi, setNetworkMmsi] = useState<number | null>(null);
+
+  // Historical traffic-density timeline.
+  const { buckets, fetchBucket } = useDensity();
+  const [densityOverride, setDensityOverride] = useState<DensityPoint[] | null>(null);
+  const onTimelineSelect = useCallback(
+    async (ts: number | null) => {
+      if (ts == null) {
+        setDensityOverride(null);
+        return;
+      }
+      setDensityOverride(await fetchBucket(ts));
+    },
+    [fetchBucket],
+  );
   const [showSelectedTrack, setShowSelectedTrack] = useState(false);
   const mapRef = useRef<MapHandle>(null);
 
@@ -274,6 +291,7 @@ export default function App() {
         }
         highlightColor={highlightColor}
         flaggedMmsis={flagged}
+        densityOverride={densityOverride}
         compiledFences={compiled}
         fenceCounts={fenceCounts}
         fenceFlash={fenceFlash}
@@ -398,6 +416,8 @@ export default function App() {
         />
 
         <AlertToasts alerts={toastAlerts} onClick={onEventClick} />
+
+        <DensityTimeline buckets={buckets} onSelect={onTimelineSelect} />
       </div>
 
       {networkMmsi != null && (

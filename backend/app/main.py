@@ -33,6 +33,7 @@ from .geofence.store import GeofenceStore
 from .ownership import OwnershipStore
 from .registry import VesselRegistry
 from .briefing import BriefingService, BriefingUnavailable
+from .density import DensityRecorder
 from .risk import RiskEngine
 from .risk_score import compute_risk
 from .sanctions import SanctionsStore
@@ -69,6 +70,18 @@ async def _geofence_loop(app: FastAPI) -> None:
             await app.state.evaluator.evaluate(emit=True)
         except Exception as exc:  # noqa: BLE001
             log.warning("geofence evaluation failed: %s", exc)
+
+
+async def _density_loop(app: FastAPI) -> None:
+    """Periodically bin the live fleet into the historical density store."""
+    interval = app.state.settings.density_sample_sec
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            snap = await app.state.store.snapshot()
+            await asyncio.to_thread(app.state.density.sample, snap)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("density sample failed: %s", exc)
 
 
 async def _risk_loop(app: FastAPI) -> None:
@@ -156,6 +169,13 @@ async def lifespan(app: FastAPI):
     await evaluator.evaluate(emit=False)  # seed membership silently
     app.state.evaluator = evaluator
 
+    # Historical traffic-density recorder.
+    density = DensityRecorder(
+        settings.density_path, settings.density_res, settings.density_bucket_sec
+    )
+    density.open()
+    app.state.density = density
+
     # Behavioral risk engine (rendezvous / spoof) + sanctions-aware flagging.
     app.state.risk_engine = RiskEngine(store, broadcaster, settings, sanctions)
 
@@ -171,6 +191,7 @@ async def lifespan(app: FastAPI):
     sweeper = asyncio.create_task(_stale_sweeper(app), name="stale-sweeper")
     geofence_task = asyncio.create_task(_geofence_loop(app), name="geofence-eval")
     risk_task = asyncio.create_task(_risk_loop(app), name="risk-eval")
+    density_task = asyncio.create_task(_density_loop(app), name="density-sample")
     registry_task = (
         asyncio.create_task(_registry_flush(app), name="registry-flush")
         if registry is not None
@@ -189,12 +210,16 @@ async def lifespan(app: FastAPI):
         sweeper.cancel()
         geofence_task.cancel()
         risk_task.cancel()
+        density_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await sweeper
         with contextlib.suppress(asyncio.CancelledError):
             await geofence_task
         with contextlib.suppress(asyncio.CancelledError):
             await risk_task
+        with contextlib.suppress(asyncio.CancelledError):
+            await density_task
+        density.close()
         if registry_task is not None:
             registry_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -278,6 +303,23 @@ async def snapshot():
 @app.get("/api/vessel/{mmsi}/trail")
 async def vessel_trail(mmsi: int):
     return {"mmsi": mmsi, "trail": await app.state.store.trail(mmsi)}
+
+
+@app.get("/api/density")
+async def density_buckets():
+    """Available density time-buckets (epoch-second starts) for the timeline."""
+    if not get_flags().get("density_timeline"):
+        return {"buckets": [], "bucket_sec": app.state.settings.density_bucket_sec}
+    return {
+        "buckets": app.state.density.buckets(),
+        "bucket_sec": app.state.settings.density_bucket_sec,
+    }
+
+
+@app.get("/api/density/{bucket}")
+async def density_bucket(bucket: int):
+    """Density cells (lat/lon/count) for one bucket."""
+    return {"points": app.state.density.points(bucket)}
 
 
 async def _assemble_risk_inputs(mmsi: int):

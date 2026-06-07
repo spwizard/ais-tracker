@@ -136,6 +136,13 @@ export interface BriefingResponse {
   cost?: BriefingCost;
 }
 
+/** A historical density cell (GET /api/density/{bucket}). */
+export interface DensityPoint {
+  lat: number;
+  lon: number;
+  count: number;
+}
+
 /** Ownership network (GET /api/vessel/{mmsi}/network). */
 export interface NetworkNode {
   id: string;

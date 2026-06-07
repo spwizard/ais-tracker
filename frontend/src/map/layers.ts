@@ -3,7 +3,7 @@ import { TripsLayer } from "@deck.gl/geo-layers";
 import { HeatmapLayer } from "@deck.gl/aggregation-layers";
 import { ScenegraphLayer } from "@deck.gl/mesh-layers";
 import { GLTFLoader } from "@loaders.gl/gltf";
-import type { TrackedVessel } from "@/types";
+import type { TrackedVessel, DensityPoint } from "@/types";
 import type { TrailPoint } from "@/hooks/useVesselTrail";
 import { colorRgbFor, groupKeyFor } from "@/lib/shipTypes";
 import { getIconAtlas, ICON_MAPPING } from "./vesselIcons";
@@ -61,6 +61,9 @@ export interface LayerOptions {
   highlightColor: [number, number, number];
   // Sanctioned / behaviorally-flagged vessels to ring in red.
   flaggedMmsis: Set<number>;
+  // When set, the heatmap renders these historical density cells instead of the
+  // live fleet, and live icons/trails are hidden (timeline scrubbing).
+  densityOverride: DensityPoint[] | null;
 }
 
 /**
@@ -83,43 +86,63 @@ export function buildLayers(opts: LayerOptions) {
     highlightTrack,
     highlightColor,
     flaggedMmsis,
+    densityOverride,
   } = opts;
 
   const layers: unknown[] = [];
 
+  // Timeline scrubbing: a historical density bucket is being viewed.
+  const history =
+    densityOverride && densityOverride.length > 0 ? densityOverride : null;
+
   // Zoom-driven cross-fade: icons in close, density heatmap far out.
-  // Density mode forces the heatmap fully on at any zoom.
-  const iconOpacity = densityMode
-    ? 0
-    : clamp01((zoom - HEAT_FULL) / (ICON_FULL - HEAT_FULL));
-  const heatOpacity = densityMode ? 1 : 1 - iconOpacity;
+  // Density mode (or viewing history) forces the heatmap fully on.
+  const iconOpacity =
+    densityMode || history
+      ? 0
+      : clamp01((zoom - HEAT_FULL) / (ICON_FULL - HEAT_FULL));
+  const heatOpacity = densityMode || history ? 1 : 1 - iconOpacity;
 
   // 3D models replace flat icons for fishing vessels when zoomed in.
-  const modelsActive = !densityMode && zoom >= MODEL_MIN_ZOOM;
+  const modelsActive = !densityMode && !history && zoom >= MODEL_MIN_ZOOM;
   const isModelVessel = (d: TrackedVessel) =>
     modelsActive && MODEL_GROUPS.has(groupKeyFor(d.ship_type));
 
-  // Density heatmap — shipping lanes light up when zoomed out.
+  // Density heatmap — live fleet, or a historical bucket when scrubbing.
   if (heatOpacity > 0.01) {
     layers.push(
-      new HeatmapLayer<TrackedVessel>({
-        id: "density",
-        data,
-        getPosition: (d) => [d.lon as number, d.lat as number],
-        getWeight: 1,
-        aggregation: "SUM",
-        radiusPixels: 38,
-        intensity: 1,
-        threshold: 0.05,
-        colorRange: HEAT_COLOR_RANGE,
-        opacity: heatOpacity,
-        updateTriggers: { getPosition: version },
-      }),
+      history
+        ? new HeatmapLayer<DensityPoint>({
+            id: "density",
+            data: history,
+            getPosition: (d) => [d.lon, d.lat],
+            getWeight: (d) => d.count,
+            aggregation: "SUM",
+            radiusPixels: 38,
+            intensity: 1,
+            threshold: 0.05,
+            colorRange: HEAT_COLOR_RANGE,
+            opacity: heatOpacity,
+            updateTriggers: { getPosition: history, getWeight: history },
+          })
+        : new HeatmapLayer<TrackedVessel>({
+            id: "density",
+            data,
+            getPosition: (d) => [d.lon as number, d.lat as number],
+            getWeight: 1,
+            aggregation: "SUM",
+            radiusPixels: 38,
+            intensity: 1,
+            threshold: 0.05,
+            colorRange: HEAT_COLOR_RANGE,
+            opacity: heatOpacity,
+            updateTriggers: { getPosition: version },
+          }),
     );
   }
 
   // Highlighted single-vessel track (drawn under the icons, over the trails).
-  if (highlightTrack && highlightTrack.length >= 2) {
+  if (!history && highlightTrack && highlightTrack.length >= 2) {
     const path = highlightTrack.map((p) => [p[0], p[1]] as [number, number]);
     // Extend the head to the vessel's live dead-reckoned position so the track
     // connects to the (also dead-reckoned) icon instead of lagging behind it.

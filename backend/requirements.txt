@@ -8,3 +8,4 @@ shapely>=2.0
 aiomqtt>=2.0
 pyais>=2.6
 anthropic>=0.69
+h3>=4.1

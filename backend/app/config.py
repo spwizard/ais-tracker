@@ -73,6 +73,12 @@ class Settings(BaseSettings):
     geofence_path: str = Field(default="data/geofences.json", alias="GEOFENCE_PATH")
     geofence_eval_sec: float = Field(default=2.0, alias="GEOFENCE_EVAL_SEC")
 
+    # --- Density timeline (spatial-temporal traffic bins) ------------------
+    density_path: str = Field(default="data/density.sqlite", alias="DENSITY_PATH")
+    density_res: int = Field(default=5, alias="DENSITY_RES")  # H3 resolution
+    density_bucket_sec: int = Field(default=3600, alias="DENSITY_BUCKET_SEC")  # 1h buckets
+    density_sample_sec: float = Field(default=60.0, alias="DENSITY_SAMPLE_SEC")
+
     # --- Risk engine -------------------------------------------------------
     risk_eval_sec: float = Field(default=20.0, alias="RISK_EVAL_SEC")
     risk_teleport_kn: float = Field(default=70.0, alias="RISK_TELEPORT_KN")
