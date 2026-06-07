@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   Ship,
   Navigation2,
@@ -31,6 +31,7 @@ import {
   Network,
   Globe,
   ExternalLink,
+  ChevronRight,
 } from "lucide-react";
 import type {
   Briefing,
@@ -395,6 +396,43 @@ function hostOf(url: string): string {
   }
 }
 
+/** Collapsible sub-section — keeps the briefing short by default. */
+function Disclosure({
+  title,
+  count,
+  accent,
+  children,
+}: {
+  title: string;
+  count: number;
+  accent?: string;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center gap-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground/80"
+      >
+        <ChevronRight
+          className={cn("h-3 w-3 shrink-0 transition-transform", open && "rotate-90")}
+        />
+        {title}
+        <span className="rounded bg-foreground/10 px-1 text-[9px] tabular-nums text-muted-foreground/80">
+          {count}
+        </span>
+        {accent && (
+          <span className="ml-auto normal-case tracking-normal text-amber-400/70">
+            {accent}
+          </span>
+        )}
+      </button>
+      {open && <div className="mt-1.5">{children}</div>}
+    </div>
+  );
+}
+
 function BriefingCard({
   briefing,
   evidence,
@@ -449,28 +487,18 @@ function BriefingCard({
       )}
 
       {briefing.recommended_actions.length > 0 && (
-        <div className="space-y-1">
-          <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-            Recommended
-          </div>
+        <Disclosure title="Recommended" count={briefing.recommended_actions.length}>
           <ul className="list-inside list-disc space-y-0.5 text-[11px] leading-snug text-muted-foreground">
             {briefing.recommended_actions.map((a, i) => (
               <li key={i}>{a}</li>
             ))}
           </ul>
-        </div>
+        </Disclosure>
       )}
 
       {openSource.length > 0 && (
-        <div className="space-y-1 rounded-md border border-border/50 bg-foreground/[0.03] p-2">
-          <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-            <Globe className="h-3 w-3" />
-            Open-source
-            <span className="ml-auto normal-case tracking-normal text-amber-400/70">
-              unverified
-            </span>
-          </div>
-          <ul className="space-y-1">
+        <Disclosure title="Open-source" count={openSource.length} accent="unverified">
+          <ul className="space-y-1.5">
             {openSource.map((o, i) => (
               <li key={i} className="text-[11px] leading-snug">
                 {o.claim}
@@ -489,13 +517,15 @@ function BriefingCard({
               </li>
             ))}
           </ul>
-        </div>
+        </Disclosure>
       )}
 
       {briefing.caveats.length > 0 && (
-        <p className="text-[10px] leading-snug text-muted-foreground/60">
-          {briefing.caveats.join(" · ")}
-        </p>
+        <Disclosure title="Caveats" count={briefing.caveats.length}>
+          <p className="text-[10px] leading-snug text-muted-foreground/70">
+            {briefing.caveats.join(" · ")}
+          </p>
+        </Disclosure>
       )}
 
       <div className="flex items-center justify-between text-[10px] text-muted-foreground/50">
