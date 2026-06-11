@@ -109,11 +109,11 @@ export function buildLayers(opts: LayerOptions) {
         imageUnscale: windMeta.imageUnscale,
         bounds: windMeta.bounds,
         numParticles: 7000, // more strands, but faint
-        maxAge: 45, // longer, fading trails → wispy
+        maxAge: 60, // long, slowly-fading trails → ghostly
         speedFactor: 1.6, // slower drift
-        width: 1.1, // thinner
+        width: 1.0, // thin
         color: [255, 255, 255],
-        opacity: 0.28, // fainter
+        opacity: 0.2, // very faint
       }),
     );
   }
