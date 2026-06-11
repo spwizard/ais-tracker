@@ -433,8 +433,16 @@ async def vessel_briefing(mmsi: int, web: bool = False):
     inputs = await _assemble_risk_inputs(mmsi)
     if inputs is None:
         raise HTTPException(status_code=404, detail="vessel not tracked")
+    v = inputs[0]
+    conditions = (
+        await app.state.windy.forecast(v.lat, v.lon)
+        if v.lat is not None and v.lon is not None
+        else None
+    )
     try:
-        return await app.state.briefing.generate(*inputs, web_search=web)
+        return await app.state.briefing.generate(
+            *inputs, web_search=web, conditions=conditions
+        )
     except BriefingUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 

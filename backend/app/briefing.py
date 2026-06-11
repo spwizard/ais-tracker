@@ -130,7 +130,11 @@ RULES OF ENGAGEMENT
      that rarely justify a high rating on their own.
 5. Calibrate the overall `risk_level` to the strongest corroborated evidence, \
    not the raw count of findings. One confirmed sanctions hit outranks several \
-   weak structural indicators.
+   weak structural indicators. Environmental context (current wind/sea state) may \
+   be supplied — treat it as context, never a primary driver: heavy weather raises \
+   operational risk and makes anomalies notable, while calm seas are precisely \
+   those conducive to a covert ship-to-ship transfer or loitering, so weigh calm \
+   conditions as mildly corroborating a rendezvous/loitering signal, not alone.
 6. Recommended actions must be concrete, evidence-driven next steps for an \
    investigator (e.g. "identify and screen the STS counterpart vessel", \
    "re-screen the beneficial owner against the latest OFAC update"), not generic \
@@ -203,6 +207,7 @@ class BriefingService:
         sanctioned_vessel: dict | None,
         owner_hits: list[tuple[str, str]],
         recent_events: list[dict],
+        conditions: dict | None = None,
     ) -> list[dict]:
         ev: list[dict] = []
 
@@ -284,6 +289,27 @@ class BriefingService:
             "AIS",
             vessel.ts,
         )
+
+        if conditions:
+            parts = []
+            if conditions.get("wind_kn") is not None:
+                w = f"wind {conditions['wind_kn']} kn"
+                if conditions.get("gust_kn"):
+                    w += f" gusting {conditions['gust_kn']} kn"
+                parts.append(w)
+            if conditions.get("wave_m") is not None:
+                wv = f"seas {conditions['wave_m']} m"
+                if conditions.get("wave_period_s"):
+                    wv += f" / {conditions['wave_period_s']} s"
+                parts.append(wv)
+            if conditions.get("pressure_hpa") is not None:
+                parts.append(f"{conditions['pressure_hpa']} hPa")
+            if parts:
+                add(
+                    "weather",
+                    "Current sea state at the vessel's position: " + ", ".join(parts),
+                    "Windy forecast",
+                )
         return ev
 
     _EMPTY_WEB = {"open_source": [], "sources": [], "cost": 0.0, "searches": 0, "tokens": 0}
@@ -378,19 +404,19 @@ class BriefingService:
         owner_hits: list[tuple[str, str]],
         recent_events: list[dict],
         web_search: bool | None = None,
+        conditions: dict | None = None,
     ) -> dict:
         use_web = self._web if web_search is None else web_search
         evidence = self.build_evidence(
-            vessel, ownership, sanctioned_vessel, owner_hits, recent_events
+            vessel, ownership, sanctioned_vessel, owner_hits, recent_events, conditions
         )
-        # Cache on the *substantive* signals only — exclude the live position
-        # fix and timestamps, which churn every AIS tick and would otherwise
-        # defeat the cache for repeat views of the same vessel. The web flag is
-        # part of the key so web and non-web briefings cache separately.
+        # Cache on the *substantive* signals only — exclude the live position fix
+        # and the (hourly-drifting) weather, which would otherwise churn the key.
+        # The web flag is part of the key so web/non-web briefings cache apart.
         stable = [
             {k: val for k, val in e.items() if k != "observed_at"}
             for e in evidence
-            if e["type"] != "state"
+            if e["type"] not in ("state", "weather")
         ]
         key = hashlib.sha256(
             json.dumps({"web": use_web, "ev": stable}, sort_keys=True).encode()
