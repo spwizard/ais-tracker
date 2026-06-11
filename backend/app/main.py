@@ -39,6 +39,7 @@ from .risk import RiskEngine
 from .risk_score import compute_risk
 from .sanctions import SanctionsStore
 from .weather import WeatherSource
+from .weather_point import WindyPoint
 from .ship_types import SHIP_TYPE_GROUPS
 from .sources import create_sources
 from .store import create_store
@@ -181,6 +182,9 @@ async def lifespan(app: FastAPI):
     evaluator.set_fences(geofence_store.list())
     await evaluator.evaluate(emit=False)  # seed membership silently
     app.state.evaluator = evaluator
+
+    # Windy point forecast (per-vessel conditions).
+    app.state.windy = WindyPoint(settings.windy_key)
 
     # GFS wind field (particle overlay).
     app.state.weather = (
@@ -349,6 +353,17 @@ async def density_buckets():
 async def density_bucket(bucket: int):
     """Density cells (lat/lon/count) for one bucket."""
     return {"points": app.state.density.points(bucket)}
+
+
+@app.get("/api/vessel/{mmsi}/conditions")
+async def vessel_conditions(mmsi: int):
+    """Windy point forecast (wind/waves/temp) at a vessel's current position."""
+    if not get_flags().get("weather"):
+        return {"conditions": None}
+    v = await app.state.store.get(mmsi)
+    if v is None or v.lat is None or v.lon is None:
+        return {"conditions": None}
+    return {"conditions": await app.state.windy.forecast(v.lat, v.lon)}
 
 
 @app.get("/api/weather/wind")

@@ -136,6 +136,19 @@ export interface BriefingResponse {
   cost?: BriefingCost;
 }
 
+/** Windy point forecast at a vessel (GET /api/vessel/{mmsi}/conditions). */
+export interface VesselConditions {
+  wind_kn?: number;
+  wind_dir?: number;
+  gust_kn?: number;
+  temp_c?: number;
+  pressure_hpa?: number;
+  wave_m?: number;
+  wave_period_s?: number;
+  wave_dir?: number;
+  ts?: number;
+}
+
 /** GFS wind-field metadata (GET /api/weather/wind). */
 export interface WeatherMeta {
   available: boolean;

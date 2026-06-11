@@ -11,6 +11,9 @@ import {
   Eye,
   EyeOff,
   Crosshair,
+  Wind,
+  Waves,
+  Thermometer,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -22,6 +25,7 @@ import { mmsiCountry, countryFromIso3 } from "@/lib/flags";
 import { useFlag } from "@/hooks/useFlags";
 import { useOwnership } from "@/hooks/useOwnership";
 import { useRisk } from "@/hooks/useRisk";
+import { useConditions } from "@/hooks/useConditions";
 import { useBriefing } from "@/hooks/useBriefing";
 import {
   Building2,
@@ -39,6 +43,7 @@ import type {
   EvidenceItem,
   RiskAssessment,
   RiskLevel,
+  VesselConditions,
 } from "@/types";
 import type { TrailPoint } from "@/hooks/useVesselTrail";
 import { cn } from "@/lib/utils";
@@ -74,6 +79,8 @@ export function VesselDetail({
   const ownership = useOwnership(v.mmsi, ownershipOn);
   const riskOn = useFlag("risk_engine");
   const risk = useRisk(v.mmsi, riskOn);
+  const weatherOn = useFlag("weather");
+  const conditions = useConditions(v.mmsi, weatherOn);
   const briefingOn = useFlag("llm_briefing");
   const briefing = useBriefing(v.mmsi);
 
@@ -248,6 +255,8 @@ export function VesselDetail({
                 {v.lat?.toFixed(4)}, {v.lon?.toFixed(4)}
               </span>
             </div>
+
+            {conditions && <ConditionsBlock c={conditions} />}
           </div>
         )}
 
@@ -394,6 +403,68 @@ function hostOf(url: string): string {
   } catch {
     return url;
   }
+}
+
+const COMPASS = ["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"];
+const compass = (deg: number) => COMPASS[Math.round(deg / 22.5) % 16];
+
+/** Windy sea-state at the vessel's position. */
+function ConditionsBlock({ c }: { c: VesselConditions }) {
+  return (
+    <>
+      <Separator />
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+          <Wind className="h-3 w-3" />
+          Conditions
+          <span className="ml-auto normal-case tracking-normal text-muted-foreground/50">
+            Windy
+          </span>
+        </div>
+        <div className="space-y-1 text-xs">
+          {c.wind_kn != null && (
+            <div className="flex items-center gap-2">
+              <Navigation2
+                className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+                style={{ transform: `rotate(${(c.wind_dir ?? 0) + 180}deg)` }}
+              />
+              <span className="text-muted-foreground">Wind</span>
+              <span className="ml-auto font-medium">
+                {c.wind_kn} kn{c.wind_dir != null && ` ${compass(c.wind_dir)}`}
+                {c.gust_kn != null && (
+                  <span className="text-muted-foreground"> · gust {c.gust_kn}</span>
+                )}
+              </span>
+            </div>
+          )}
+          {c.wave_m != null && (
+            <div className="flex items-center gap-2">
+              <Waves className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <span className="text-muted-foreground">Waves</span>
+              <span className="ml-auto font-medium">
+                {c.wave_m} m{c.wave_period_s != null && ` / ${c.wave_period_s}s`}
+                {c.wave_dir != null && (
+                  <span className="text-muted-foreground"> {compass(c.wave_dir)}</span>
+                )}
+              </span>
+            </div>
+          )}
+          {(c.temp_c != null || c.pressure_hpa != null) && (
+            <div className="flex items-center gap-2">
+              <Thermometer className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <span className="text-muted-foreground">Air</span>
+              <span className="ml-auto font-medium">
+                {c.temp_c != null && `${c.temp_c}°C`}
+                {c.pressure_hpa != null && (
+                  <span className="text-muted-foreground"> · {c.pressure_hpa} hPa</span>
+                )}
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+    </>
+  );
 }
 
 /** Collapsible sub-section — keeps the briefing short by default. */

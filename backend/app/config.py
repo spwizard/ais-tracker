@@ -91,6 +91,9 @@ class Settings(BaseSettings):
         w, s, e, n = (float(x) for x in self.weather_bbox_raw.split(","))
         return (w, s, e, n)
 
+    # Windy Point Forecast — per-vessel conditions in the detail panel.
+    windy_key: str = Field(default="", alias="WINDY_KEY")
+
     # --- Risk engine -------------------------------------------------------
     risk_eval_sec: float = Field(default=20.0, alias="RISK_EVAL_SEC")
     risk_teleport_kn: float = Field(default=70.0, alias="RISK_TELEPORT_KN")
