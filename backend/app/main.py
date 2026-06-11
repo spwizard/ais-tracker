@@ -38,7 +38,7 @@ from .density import DensityRecorder
 from .risk import RiskEngine
 from .risk_score import compute_risk
 from .sanctions import SanctionsStore
-from .weather import WeatherSource
+from .weather import WeatherSource, WaveSource
 from .weather_point import WindyPoint
 from .ship_types import SHIP_TYPE_GROUPS
 from .sources import create_sources
@@ -76,13 +76,18 @@ async def _geofence_loop(app: FastAPI) -> None:
 
 
 async def _weather_loop(app: FastAPI) -> None:
-    """Refresh the GFS wind field on startup and every few hours."""
+    """Refresh the GFS wind + wave fields on startup and every few hours."""
     interval = app.state.settings.weather_refresh_sec
     while True:
         try:
             await app.state.weather.refresh()
         except Exception as exc:  # noqa: BLE001
             log.warning("weather refresh failed: %s", exc)
+        if app.state.waves is not None:
+            try:
+                await app.state.waves.refresh()
+            except Exception as exc:  # noqa: BLE001
+                log.warning("wave refresh failed: %s", exc)
         await asyncio.sleep(interval)
 
 
@@ -186,9 +191,16 @@ async def lifespan(app: FastAPI):
     # Windy point forecast (per-vessel conditions).
     app.state.windy = WindyPoint(settings.windy_key)
 
-    # GFS wind field (particle overlay).
+    # GFS wind field (particle overlay) + GFS-Wave sea-state field, each
+    # encoding several forecast hours for the time scrubber.
+    fhours = settings.weather_forecast_hours
     app.state.weather = (
-        WeatherSource(settings.weather_bbox, settings.weather_dir)
+        WeatherSource(settings.weather_bbox, settings.weather_dir, fhours)
+        if settings.weather_enabled
+        else None
+    )
+    app.state.waves = (
+        WaveSource(settings.weather_bbox, settings.weather_dir, fhours)
         if settings.weather_enabled
         else None
     )
@@ -355,15 +367,21 @@ async def density_bucket(bucket: int):
     return {"points": app.state.density.points(bucket)}
 
 
+async def _conditions_for(v) -> dict | None:
+    """Windy point forecast at a vessel's position, gated by the weather flag.
+    Quota-friendly: WindyPoint caches by ¼° cell × hour."""
+    if v is None or v.lat is None or v.lon is None:
+        return None
+    if not get_flags().get("weather"):
+        return None
+    return await app.state.windy.forecast(v.lat, v.lon)
+
+
 @app.get("/api/vessel/{mmsi}/conditions")
 async def vessel_conditions(mmsi: int):
     """Windy point forecast (wind/waves/temp) at a vessel's current position."""
-    if not get_flags().get("weather"):
-        return {"conditions": None}
     v = await app.state.store.get(mmsi)
-    if v is None or v.lat is None or v.lon is None:
-        return {"conditions": None}
-    return {"conditions": await app.state.windy.forecast(v.lat, v.lon)}
+    return {"conditions": await _conditions_for(v)}
 
 
 @app.get("/api/weather/wind")
@@ -376,12 +394,31 @@ async def weather_wind():
 
 
 @app.get("/api/weather/wind.png")
-async def weather_wind_png():
-    """The encoded U/V velocity image for the particle layer."""
+async def weather_wind_png(step: int = 0):
+    """The encoded U/V velocity image for the particle layer, at a forecast hour."""
     src = app.state.weather
-    path = src.png_path if src is not None else None
+    path = src.png_path(step) if src is not None else None
     if not path:
         raise HTTPException(status_code=404, detail="no wind field yet")
+    return FileResponse(path, media_type="image/png")
+
+
+@app.get("/api/weather/waves")
+async def weather_waves():
+    """Metadata for the current GFS-Wave significant-wave-height field."""
+    src = app.state.waves
+    if not get_flags().get("weather") or src is None or src.meta is None:
+        return {"available": False}
+    return {"available": True, **src.meta}
+
+
+@app.get("/api/weather/waves.png")
+async def weather_waves_png(step: int = 0):
+    """The encoded significant-wave-height image for the sea-state raster, at a step."""
+    src = app.state.waves
+    path = src.png_path(step) if src is not None else None
+    if not path:
+        raise HTTPException(status_code=404, detail="no wave field yet")
     return FileResponse(path, media_type="image/png")
 
 
@@ -421,7 +458,8 @@ async def vessel_risk(mmsi: int):
     inputs = await _assemble_risk_inputs(mmsi)
     if inputs is None:
         return {"risk": compute_risk(None, None, None, [], [])}
-    return {"risk": compute_risk(*inputs)}
+    conditions = await _conditions_for(inputs[0])
+    return {"risk": compute_risk(*inputs, conditions=conditions)}
 
 
 @app.post("/api/vessel/{mmsi}/briefing")
@@ -433,12 +471,7 @@ async def vessel_briefing(mmsi: int, web: bool = False):
     inputs = await _assemble_risk_inputs(mmsi)
     if inputs is None:
         raise HTTPException(status_code=404, detail="vessel not tracked")
-    v = inputs[0]
-    conditions = (
-        await app.state.windy.forecast(v.lat, v.lon)
-        if v.lat is not None and v.lon is not None
-        else None
-    )
+    conditions = await _conditions_for(inputs[0])
     try:
         return await app.state.briefing.generate(
             *inputs, web_search=web, conditions=conditions

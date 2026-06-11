@@ -60,6 +60,9 @@ interface MapViewProps {
   showWind: boolean;
   windImage: unknown | null;
   windMeta: WeatherMeta | null;
+  showWaves: boolean;
+  waveImage: unknown | null;
+  waveMeta: WeatherMeta | null;
   // Geofences
   compiledFences: CompiledFence[];
   fenceCounts: Record<string, number>;
@@ -98,6 +101,9 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
     showWind,
     windImage,
     windMeta,
+    showWaves,
+    waveImage,
+    waveMeta,
     compiledFences,
     fenceCounts,
     fenceFlash,
@@ -245,6 +251,9 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
         showWind,
         windImage,
         windMeta,
+        showWaves,
+        waveImage,
+        waveMeta,
       }),
       ...buildDraftLayers(
         drawMode ? { shape: drawMode, points: draw.points, hover: draw.hover, color: drawColor } : null,
@@ -269,6 +278,9 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
       showWind,
       windImage,
       windMeta,
+      showWaves,
+      waveImage,
+      waveMeta,
       compiledFences,
       fenceCounts,
       fenceFlash,

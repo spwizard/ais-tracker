@@ -1,4 +1,4 @@
-import { Layers, Route, Navigation, Flame, Wind } from "lucide-react";
+import { Layers, Route, Navigation, Flame, Wind, Waves } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -14,6 +14,9 @@ interface LayerControlsProps {
   showWind: boolean;
   onToggleWind: (v: boolean) => void;
   windAvailable: boolean;
+  showWaves: boolean;
+  onToggleWaves: (v: boolean) => void;
+  wavesAvailable: boolean;
   onJump: (target: ViewTarget) => void;
 }
 
@@ -38,6 +41,9 @@ export function LayerControls({
   showWind,
   onToggleWind,
   windAvailable,
+  showWaves,
+  onToggleWaves,
+  wavesAvailable,
   onJump,
 }: LayerControlsProps) {
   return (
@@ -69,6 +75,16 @@ export function LayerControls({
               Wind (GFS)
             </span>
             <Switch checked={showWind} onCheckedChange={onToggleWind} />
+          </label>
+        )}
+
+        {wavesAvailable && (
+          <label className="flex cursor-pointer items-center justify-between rounded-md px-1 py-1">
+            <span className="flex items-center gap-2 text-sm">
+              <Waves className="h-4 w-4 text-muted-foreground" />
+              Sea state (GFS-Wave)
+            </span>
+            <Switch checked={showWaves} onCheckedChange={onToggleWaves} />
           </label>
         )}
 

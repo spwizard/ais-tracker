@@ -16,8 +16,10 @@ import { DrawToolbar } from "@/panels/DrawToolbar";
 import { AlertToasts, type ToastAlert } from "@/panels/AlertToasts";
 import { OwnershipGraph } from "@/panels/OwnershipGraph";
 import { DensityTimeline } from "@/panels/DensityTimeline";
+import { ForecastTimeline } from "@/panels/ForecastTimeline";
+import { MapLegend } from "@/panels/MapLegend";
 import { useDensity } from "@/hooks/useDensity";
-import { useWeather } from "@/hooks/useWeather";
+import { useWeather, useWaves } from "@/hooks/useWeather";
 import { useFlag } from "@/hooks/useFlags";
 import type { DensityPoint } from "@/types";
 import { useGeofences } from "@/hooks/useGeofences";
@@ -53,13 +55,20 @@ export default function App() {
   const [showTrails, setShowTrails] = useState(false); // off until the user enables it
   const [densityMode, setDensityMode] = useState(false);
   const [showWind, setShowWind] = useState(false);
+  const [showWaves, setShowWaves] = useState(false);
+  const [forecastStep, setForecastStep] = useState(0); // GFS forecast hour, 0 = now
   const [is3D, setIs3D] = useState(false);
   const [selectedMmsi, setSelectedMmsi] = useState<number | null>(null);
   const [networkMmsi, setNetworkMmsi] = useState<number | null>(null);
 
-  // GFS wind particle overlay (loaded only when the feature flag is on).
+  // GFS wind particle overlay + GFS-Wave sea state. Metadata (incl. forecast
+  // steps) loads whenever the feature flag is on so the toggles + scrubber can
+  // appear; the textures load only for the layer that's toggled on, at the
+  // scrubbed forecast hour.
   const weatherOn = useFlag("weather");
-  const weather = useWeather(weatherOn);
+  const weather = useWeather(weatherOn, forecastStep, showWind);
+  const waves = useWaves(weatherOn, forecastStep, showWaves);
+  const forecastSteps = weather.steps.length ? weather.steps : waves.steps;
 
   // Historical traffic-density timeline.
   const { buckets, fetchBucket } = useDensity();
@@ -306,6 +315,9 @@ export default function App() {
         showWind={showWind}
         windImage={weather.image}
         windMeta={weather.meta}
+        showWaves={showWaves}
+        waveImage={waves.image}
+        waveMeta={waves.meta}
         compiledFences={compiled}
         fenceCounts={fenceCounts}
         fenceFlash={fenceFlash}
@@ -370,7 +382,10 @@ export default function App() {
             onToggleDensity={setDensityMode}
             showWind={showWind}
             onToggleWind={setShowWind}
-            windAvailable={!!weather.meta?.available}
+            windAvailable={weather.available}
+            showWaves={showWaves}
+            onToggleWaves={setShowWaves}
+            wavesAvailable={waves.available}
             onJump={handleJump}
           />
         )}
@@ -436,6 +451,25 @@ export default function App() {
 
         {densityMode && (
           <DensityTimeline buckets={buckets} onSelect={onTimelineSelect} />
+        )}
+
+        <MapLegend
+          showWind={showWind}
+          windAvailable={weather.available}
+          showWaves={showWaves}
+          wavesAvailable={waves.available}
+          densityMode={densityMode}
+          flaggedCount={flagged.size}
+          hasSelection={selectedMmsi != null}
+        />
+
+        {(showWind || showWaves) && (
+          <ForecastTimeline
+            steps={forecastSteps}
+            value={forecastStep}
+            onChange={setForecastStep}
+            raised={densityMode}
+          />
         )}
       </div>
 

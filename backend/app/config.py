@@ -85,11 +85,19 @@ class Settings(BaseSettings):
     weather_refresh_sec: float = Field(default=10800.0, alias="WEATHER_REFRESH_SEC")  # 3h
     # Region as W,S,E,N — covers UK/Channel + Baltic + Norway (our feeds).
     weather_bbox_raw: str = Field(default="-12,46,32,72", alias="WEATHER_BBOX")
+    # GFS forecast hours to encode for the time scrubber (the first is "now").
+    weather_forecast_hours_raw: str = Field(
+        default="0,6,12,18,24,36,48", alias="WEATHER_FORECAST_HOURS"
+    )
 
     @property
     def weather_bbox(self) -> tuple[float, float, float, float]:
         w, s, e, n = (float(x) for x in self.weather_bbox_raw.split(","))
         return (w, s, e, n)
+
+    @property
+    def weather_forecast_hours(self) -> tuple[int, ...]:
+        return tuple(int(x) for x in self.weather_forecast_hours_raw.split(",") if x.strip())
 
     # Windy Point Forecast — per-vessel conditions in the detail panel.
     windy_key: str = Field(default="", alias="WINDY_KEY")

@@ -149,15 +149,28 @@ export interface VesselConditions {
   ts?: number;
 }
 
-/** GFS wind-field metadata (GET /api/weather/wind). */
-export interface WeatherMeta {
-  available: boolean;
-  bounds: [number, number, number, number]; // W,S,E,N
+/** One forecast hour of a GFS field. */
+export interface ForecastStep {
+  step: number; // forecast hour (0 = analysis / "now")
+  valid: number; // valid time, epoch seconds
+  imageUnscale: [number, number];
   width: number;
   height: number;
-  imageUnscale: [number, number];
+}
+
+/** GFS field metadata (GET /api/weather/wind | /waves), with forecast steps. */
+export interface WeatherResponse {
+  available: boolean;
+  bounds: [number, number, number, number]; // W,S,E,N
   cycle: string;
   updated: string;
+  steps: ForecastStep[];
+}
+
+/** What a deck.gl weather layer needs for the currently-displayed step. */
+export interface WeatherMeta {
+  bounds: [number, number, number, number];
+  imageUnscale: [number, number];
 }
 
 /** A historical density cell (GET /api/density/{bucket}). */

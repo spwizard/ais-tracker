@@ -3,7 +3,7 @@ import { TripsLayer } from "@deck.gl/geo-layers";
 import { HeatmapLayer } from "@deck.gl/aggregation-layers";
 import { ScenegraphLayer } from "@deck.gl/mesh-layers";
 import { GLTFLoader } from "@loaders.gl/gltf";
-import { ParticleLayer, ImageType } from "weatherlayers-gl";
+import { ParticleLayer, RasterLayer, ImageType } from "weatherlayers-gl";
 import type { TrackedVessel, DensityPoint, WeatherMeta } from "@/types";
 import type { TrailPoint } from "@/hooks/useVesselTrail";
 import { colorRgbFor, groupKeyFor } from "@/lib/shipTypes";
@@ -33,7 +33,7 @@ const ICON_FULL = 6.5;
 const HEAT_FULL = 4.5;
 
 // Cool→hot glow tuned for the dark basemap (deep blue → cyan → hot white).
-const HEAT_COLOR_RANGE: [number, number, number][] = [
+export const HEAT_COLOR_RANGE: [number, number, number][] = [
   [8, 48, 107],
   [33, 113, 181],
   [33, 160, 220],
@@ -45,6 +45,36 @@ const HEAT_COLOR_RANGE: [number, number, number][] = [
 function clamp01(x: number): number {
   return Math.min(1, Math.max(0, x));
 }
+
+// Wind-speed colormap (m/s → RGBA), a translucent raster beneath the particles
+// that gives the all-white strands their missing magnitude context. Calm seas
+// are fully transparent so the basemap shows through; warmth and alpha climb
+// with speed (blue → cyan → green → amber → red), roughly tracking Beaufort.
+export const WIND_SPEED_PALETTE: [number, [number, number, number, number]][] = [
+  [0, [10, 40, 90, 0]],
+  [3, [33, 113, 181, 55]],
+  [6, [34, 211, 238, 85]],
+  [9, [74, 222, 128, 115]],
+  [12, [250, 204, 21, 150]],
+  [16, [249, 115, 22, 180]],
+  [21, [239, 68, 68, 205]],
+  [28, [217, 70, 239, 225]],
+];
+
+// Significant-wave-height colormap (metres → RGBA), the sea-state raster. Land
+// is already masked out in the texture's alpha; calm water is transparent so
+// the basemap reads through. Tracks the WMO sea-state scale: calm → slight →
+// moderate → rough → very rough → high. A teal-anchored ramp, distinct from the
+// blue-anchored wind ramp so the two layers stay legible if both are on.
+export const WAVE_HEIGHT_PALETTE: [number, [number, number, number, number]][] = [
+  [0, [12, 74, 110, 0]],
+  [0.5, [13, 148, 136, 70]],
+  [1.25, [45, 212, 191, 110]],
+  [2.5, [132, 204, 22, 150]],
+  [4, [250, 204, 21, 180]],
+  [6, [249, 115, 22, 205]],
+  [9, [225, 29, 72, 230]],
+];
 
 export interface LayerOptions {
   data: TrackedVessel[];
@@ -69,6 +99,10 @@ export interface LayerOptions {
   showWind: boolean;
   windImage: unknown | null; // weatherlayers TextureData
   windMeta: WeatherMeta | null;
+  // GFS-Wave sea-state raster.
+  showWaves: boolean;
+  waveImage: unknown | null; // weatherlayers TextureData
+  waveMeta: WeatherMeta | null;
 }
 
 /**
@@ -95,12 +129,43 @@ export function buildLayers(opts: LayerOptions) {
     showWind,
     windImage,
     windMeta,
+    showWaves,
+    waveImage,
+    waveMeta,
   } = opts;
 
   const layers: unknown[] = [];
 
-  // Animated GFS wind particles — drawn first so it sits under everything.
+  // GFS-Wave sea state — drawn at the very bottom so wind (if also on) and all
+  // traffic sit above it. Land is pre-masked in the texture's alpha channel.
+  if (showWaves && waveImage && waveMeta) {
+    layers.push(
+      new RasterLayer({
+        id: "waves",
+        image: waveImage as never,
+        imageType: ImageType.SCALAR, // significant wave height, metres
+        imageUnscale: waveMeta.imageUnscale,
+        bounds: waveMeta.bounds,
+        palette: WAVE_HEIGHT_PALETTE as never,
+        opacity: 0.7,
+      }),
+    );
+  }
+
+  // GFS wind — a coloured speed raster underlay with animated particles on top.
+  // Both are drawn first so the weather sits beneath traffic + icons.
   if (showWind && windImage && windMeta) {
+    layers.push(
+      new RasterLayer({
+        id: "wind-speed",
+        image: windImage as never,
+        imageType: ImageType.VECTOR, // renders the U/V magnitude (wind speed)
+        imageUnscale: windMeta.imageUnscale,
+        bounds: windMeta.bounds,
+        palette: WIND_SPEED_PALETTE as never,
+        opacity: 0.65, // subtle backdrop; the palette alpha does the shaping
+      }),
+    );
     layers.push(
       new ParticleLayer({
         id: "wind",
