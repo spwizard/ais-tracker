@@ -13,6 +13,7 @@ DEFAULTS: dict[str, bool] = {
     "risk_engine": True,    # behavioral detectors (rendezvous / spoof)
     "llm_briefing": True,   # Claude-generated risk briefing
     "density_timeline": True,  # historical traffic-density timeline
+    "weather": True,        # GFS wind particle overlay
 }
 
 

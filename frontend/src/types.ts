@@ -136,6 +136,17 @@ export interface BriefingResponse {
   cost?: BriefingCost;
 }
 
+/** GFS wind-field metadata (GET /api/weather/wind). */
+export interface WeatherMeta {
+  available: boolean;
+  bounds: [number, number, number, number]; // W,S,E,N
+  width: number;
+  height: number;
+  imageUnscale: [number, number];
+  cycle: string;
+  updated: string;
+}
+
 /** A historical density cell (GET /api/density/{bucket}). */
 export interface DensityPoint {
   lat: number;

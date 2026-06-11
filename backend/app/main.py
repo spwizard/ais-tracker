@@ -23,6 +23,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import get_settings
@@ -37,6 +38,7 @@ from .density import DensityRecorder
 from .risk import RiskEngine
 from .risk_score import compute_risk
 from .sanctions import SanctionsStore
+from .weather import WeatherSource
 from .ship_types import SHIP_TYPE_GROUPS
 from .sources import create_sources
 from .store import create_store
@@ -70,6 +72,17 @@ async def _geofence_loop(app: FastAPI) -> None:
             await app.state.evaluator.evaluate(emit=True)
         except Exception as exc:  # noqa: BLE001
             log.warning("geofence evaluation failed: %s", exc)
+
+
+async def _weather_loop(app: FastAPI) -> None:
+    """Refresh the GFS wind field on startup and every few hours."""
+    interval = app.state.settings.weather_refresh_sec
+    while True:
+        try:
+            await app.state.weather.refresh()
+        except Exception as exc:  # noqa: BLE001
+            log.warning("weather refresh failed: %s", exc)
+        await asyncio.sleep(interval)
 
 
 async def _density_loop(app: FastAPI) -> None:
@@ -169,6 +182,13 @@ async def lifespan(app: FastAPI):
     await evaluator.evaluate(emit=False)  # seed membership silently
     app.state.evaluator = evaluator
 
+    # GFS wind field (particle overlay).
+    app.state.weather = (
+        WeatherSource(settings.weather_bbox, settings.weather_dir)
+        if settings.weather_enabled
+        else None
+    )
+
     # Historical traffic-density recorder.
     density = DensityRecorder(
         settings.density_path, settings.density_res, settings.density_bucket_sec
@@ -192,6 +212,11 @@ async def lifespan(app: FastAPI):
     geofence_task = asyncio.create_task(_geofence_loop(app), name="geofence-eval")
     risk_task = asyncio.create_task(_risk_loop(app), name="risk-eval")
     density_task = asyncio.create_task(_density_loop(app), name="density-sample")
+    weather_task = (
+        asyncio.create_task(_weather_loop(app), name="weather-refresh")
+        if app.state.weather is not None
+        else None
+    )
     registry_task = (
         asyncio.create_task(_registry_flush(app), name="registry-flush")
         if registry is not None
@@ -219,6 +244,10 @@ async def lifespan(app: FastAPI):
             await risk_task
         with contextlib.suppress(asyncio.CancelledError):
             await density_task
+        if weather_task is not None:
+            weather_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await weather_task
         density.close()
         if registry_task is not None:
             registry_task.cancel()
@@ -320,6 +349,25 @@ async def density_buckets():
 async def density_bucket(bucket: int):
     """Density cells (lat/lon/count) for one bucket."""
     return {"points": app.state.density.points(bucket)}
+
+
+@app.get("/api/weather/wind")
+async def weather_wind():
+    """Metadata for the current GFS wind field (bounds, unscale, cycle)."""
+    src = app.state.weather
+    if not get_flags().get("weather") or src is None or src.meta is None:
+        return {"available": False}
+    return {"available": True, **src.meta}
+
+
+@app.get("/api/weather/wind.png")
+async def weather_wind_png():
+    """The encoded U/V velocity image for the particle layer."""
+    src = app.state.weather
+    path = src.png_path if src is not None else None
+    if not path:
+        raise HTTPException(status_code=404, detail="no wind field yet")
+    return FileResponse(path, media_type="image/png")
 
 
 async def _assemble_risk_inputs(mmsi: int):

@@ -17,6 +17,8 @@ import { AlertToasts, type ToastAlert } from "@/panels/AlertToasts";
 import { OwnershipGraph } from "@/panels/OwnershipGraph";
 import { DensityTimeline } from "@/panels/DensityTimeline";
 import { useDensity } from "@/hooks/useDensity";
+import { useWeather } from "@/hooks/useWeather";
+import { useFlag } from "@/hooks/useFlags";
 import type { DensityPoint } from "@/types";
 import { useGeofences } from "@/hooks/useGeofences";
 import type { DrawResult } from "@/hooks/useGeofenceDraw";
@@ -50,9 +52,14 @@ export default function App() {
   const [filters, setFilters] = useState<Filters>(defaultFilters);
   const [showTrails, setShowTrails] = useState(false); // off until the user enables it
   const [densityMode, setDensityMode] = useState(false);
+  const [showWind, setShowWind] = useState(false);
   const [is3D, setIs3D] = useState(false);
   const [selectedMmsi, setSelectedMmsi] = useState<number | null>(null);
   const [networkMmsi, setNetworkMmsi] = useState<number | null>(null);
+
+  // GFS wind particle overlay (loaded only when the feature flag is on).
+  const weatherOn = useFlag("weather");
+  const weather = useWeather(weatherOn);
 
   // Historical traffic-density timeline.
   const { buckets, fetchBucket } = useDensity();
@@ -296,6 +303,9 @@ export default function App() {
         highlightColor={highlightColor}
         flaggedMmsis={flagged}
         densityOverride={densityOverride}
+        showWind={showWind}
+        windImage={weather.image}
+        windMeta={weather.meta}
         compiledFences={compiled}
         fenceCounts={fenceCounts}
         fenceFlash={fenceFlash}
@@ -358,6 +368,9 @@ export default function App() {
             onToggleTrails={setShowTrails}
             densityMode={densityMode}
             onToggleDensity={setDensityMode}
+            showWind={showWind}
+            onToggleWind={setShowWind}
+            windAvailable={!!weather.meta?.available}
             onJump={handleJump}
           />
         )}

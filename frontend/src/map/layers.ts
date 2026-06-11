@@ -3,7 +3,8 @@ import { TripsLayer } from "@deck.gl/geo-layers";
 import { HeatmapLayer } from "@deck.gl/aggregation-layers";
 import { ScenegraphLayer } from "@deck.gl/mesh-layers";
 import { GLTFLoader } from "@loaders.gl/gltf";
-import type { TrackedVessel, DensityPoint } from "@/types";
+import { ParticleLayer, ImageType } from "weatherlayers-gl";
+import type { TrackedVessel, DensityPoint, WeatherMeta } from "@/types";
 import type { TrailPoint } from "@/hooks/useVesselTrail";
 import { colorRgbFor, groupKeyFor } from "@/lib/shipTypes";
 import { getIconAtlas, ICON_MAPPING } from "./vesselIcons";
@@ -64,6 +65,10 @@ export interface LayerOptions {
   // When set, the heatmap renders these historical density cells instead of the
   // live fleet, and live icons/trails are hidden (timeline scrubbing).
   densityOverride: DensityPoint[] | null;
+  // GFS wind particle overlay.
+  showWind: boolean;
+  windImage: unknown | null; // weatherlayers TextureData
+  windMeta: WeatherMeta | null;
 }
 
 /**
@@ -87,9 +92,31 @@ export function buildLayers(opts: LayerOptions) {
     highlightColor,
     flaggedMmsis,
     densityOverride,
+    showWind,
+    windImage,
+    windMeta,
   } = opts;
 
   const layers: unknown[] = [];
+
+  // Animated GFS wind particles — drawn first so it sits under everything.
+  if (showWind && windImage && windMeta) {
+    layers.push(
+      new ParticleLayer({
+        id: "wind",
+        image: windImage as never,
+        imageType: ImageType.VECTOR,
+        imageUnscale: windMeta.imageUnscale,
+        bounds: windMeta.bounds,
+        numParticles: 5000,
+        maxAge: 25,
+        speedFactor: 3,
+        width: 1.6,
+        color: [255, 255, 255],
+        opacity: 0.4,
+      }),
+    );
+  }
 
   // Timeline scrubbing: a historical density bucket is being viewed.
   const history =

@@ -1,4 +1,4 @@
-import { Layers, Route, Navigation, Flame } from "lucide-react";
+import { Layers, Route, Navigation, Flame, Wind } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -11,6 +11,9 @@ interface LayerControlsProps {
   onToggleTrails: (v: boolean) => void;
   densityMode: boolean;
   onToggleDensity: (v: boolean) => void;
+  showWind: boolean;
+  onToggleWind: (v: boolean) => void;
+  windAvailable: boolean;
   onJump: (target: ViewTarget) => void;
 }
 
@@ -32,6 +35,9 @@ export function LayerControls({
   onToggleTrails,
   densityMode,
   onToggleDensity,
+  showWind,
+  onToggleWind,
+  windAvailable,
   onJump,
 }: LayerControlsProps) {
   return (
@@ -55,6 +61,16 @@ export function LayerControls({
         <p className="px-1 text-[10px] leading-snug text-muted-foreground/60">
           Shows shipping-lane density. Also appears automatically when you zoom out.
         </p>
+
+        {windAvailable && (
+          <label className="flex cursor-pointer items-center justify-between rounded-md px-1 py-1">
+            <span className="flex items-center gap-2 text-sm">
+              <Wind className="h-4 w-4 text-muted-foreground" />
+              Wind (GFS)
+            </span>
+            <Switch checked={showWind} onCheckedChange={onToggleWind} />
+          </label>
+        )}
 
         <Separator />
 

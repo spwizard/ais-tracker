@@ -79,6 +79,18 @@ class Settings(BaseSettings):
     density_bucket_sec: int = Field(default=3600, alias="DENSITY_BUCKET_SEC")  # 1h buckets
     density_sample_sec: float = Field(default=60.0, alias="DENSITY_SAMPLE_SEC")
 
+    # --- Weather (GFS wind field) ------------------------------------------
+    weather_enabled: bool = Field(default=True, alias="WEATHER_ENABLED")
+    weather_dir: str = Field(default="data/weather", alias="WEATHER_DIR")
+    weather_refresh_sec: float = Field(default=10800.0, alias="WEATHER_REFRESH_SEC")  # 3h
+    # Region as W,S,E,N — covers UK/Channel + Baltic + Norway (our feeds).
+    weather_bbox_raw: str = Field(default="-12,46,32,72", alias="WEATHER_BBOX")
+
+    @property
+    def weather_bbox(self) -> tuple[float, float, float, float]:
+        w, s, e, n = (float(x) for x in self.weather_bbox_raw.split(","))
+        return (w, s, e, n)
+
     # --- Risk engine -------------------------------------------------------
     risk_eval_sec: float = Field(default=20.0, alias="RISK_EVAL_SEC")
     risk_teleport_kn: float = Field(default=70.0, alias="RISK_TELEPORT_KN")

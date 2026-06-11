@@ -13,7 +13,7 @@ import {
   WebMercatorViewport,
 } from "@deck.gl/core";
 import { Map } from "react-map-gl/maplibre";
-import type { TrackedVessel, DensityPoint } from "@/types";
+import type { TrackedVessel, DensityPoint, WeatherMeta } from "@/types";
 import { NAV_STATUS, colorHexFor } from "@/lib/shipTypes";
 import { buildLayers } from "./layers";
 import { buildFenceLayers, buildDraftLayers } from "./geofenceLayers";
@@ -57,6 +57,9 @@ interface MapViewProps {
   highlightColor: [number, number, number];
   flaggedMmsis: Set<number>;
   densityOverride: DensityPoint[] | null;
+  showWind: boolean;
+  windImage: unknown | null;
+  windMeta: WeatherMeta | null;
   // Geofences
   compiledFences: CompiledFence[];
   fenceCounts: Record<string, number>;
@@ -92,6 +95,9 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
     highlightColor,
     flaggedMmsis,
     densityOverride,
+    showWind,
+    windImage,
+    windMeta,
     compiledFences,
     fenceCounts,
     fenceFlash,
@@ -236,6 +242,9 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
         highlightColor,
         flaggedMmsis,
         densityOverride,
+        showWind,
+        windImage,
+        windMeta,
       }),
       ...buildDraftLayers(
         drawMode ? { shape: drawMode, points: draw.points, hover: draw.hover, color: drawColor } : null,
@@ -257,6 +266,9 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
       highlightColor,
       flaggedMmsis,
       densityOverride,
+      showWind,
+      windImage,
+      windMeta,
       compiledFences,
       fenceCounts,
       fenceFlash,
