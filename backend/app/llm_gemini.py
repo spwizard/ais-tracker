@@ -30,7 +30,22 @@ PRICING: dict[str, tuple[float, float]] = {
     "gemini-2.5-flash": (0.30, 2.50),
     "gemini-2.5-flash-lite": (0.10, 0.40),
     "gemini-2.0-flash": (0.10, 0.40),
+    "gemini-2.0-flash-lite": (0.075, 0.30),
 }
+
+# Each model has its own free-tier daily quota, so on a 429 we fall through to
+# the next comparable model — tripling effective free-tier capacity. (Harmless
+# on the paid tier: the primary almost never 429s.)
+FALLBACKS = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-2.0-flash-lite"]
+
+
+def _chain(primary: str) -> list[str]:
+    return [primary] + [m for m in FALLBACKS if m != primary]
+
+
+def _is_quota(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return "429" in msg or "resource_exhausted" in msg or "quota" in msg
 
 
 @lru_cache(maxsize=4)
@@ -80,20 +95,29 @@ async def generate_structured(
     max_output_tokens: int = 8000,
     thinking_budget: int = 0,
 ) -> tuple[BaseModel | None, Any]:
-    """One structured-output call → (validated model | None, usage)."""
+    """One structured-output call → (validated model | None, usage). Falls back
+    to the next model on a quota (429) error."""
     client = get_client(api_key)
-    resp = await client.aio.models.generate_content(
-        model=model,
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            system_instruction=system,
-            response_mime_type="application/json",
-            response_schema=schema,
-            max_output_tokens=max_output_tokens,
-            thinking_config=types.ThinkingConfig(thinking_budget=thinking_budget),
-        ),
+    cfg = types.GenerateContentConfig(
+        system_instruction=system,
+        response_mime_type="application/json",
+        response_schema=schema,
+        max_output_tokens=max_output_tokens,
+        thinking_config=types.ThinkingConfig(thinking_budget=thinking_budget),
     )
-    return resp.parsed, resp.usage_metadata
+    last_exc: Exception | None = None
+    for m in _chain(model):
+        try:
+            resp = await client.aio.models.generate_content(model=m, contents=prompt, config=cfg)
+            if m != model:
+                log.info("gemini: used fallback model %s", m)
+            return resp.parsed, resp.usage_metadata
+        except Exception as exc:  # noqa: BLE001
+            if not _is_quota(exc):
+                raise
+            log.warning("gemini %s quota hit, trying next model", m)
+            last_exc = exc
+    raise last_exc  # type: ignore[misc]
 
 
 class TurnResult:
@@ -120,38 +144,49 @@ async def stream_turn(
     then a final ``TurnResult``. Reading parts directly avoids the SDK's
     'non-text parts' warning when a turn mixes text and function calls."""
     client = get_client(api_key)
-    stream = await client.aio.models.generate_content_stream(
-        model=model,
-        contents=contents,
-        config=types.GenerateContentConfig(
-            system_instruction=system,
-            tools=tools,
-            automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
-            tool_config=types.ToolConfig(
-                function_calling_config=types.FunctionCallingConfig(mode="AUTO")
-            ),
-            max_output_tokens=max_output_tokens,
-            thinking_config=types.ThinkingConfig(thinking_budget=thinking_budget),
+    cfg = types.GenerateContentConfig(
+        system_instruction=system,
+        tools=tools,
+        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+        tool_config=types.ToolConfig(
+            function_calling_config=types.FunctionCallingConfig(mode="AUTO")
         ),
+        max_output_tokens=max_output_tokens,
+        thinking_config=types.ThinkingConfig(thinking_budget=thinking_budget),
     )
-    content = None
-    usage = None
-    calls: list = []
-    async for chunk in stream:
-        if chunk.usage_metadata:
-            usage = chunk.usage_metadata
-        if not chunk.candidates:
-            continue
-        cand = chunk.candidates[0]
-        if cand.content:
-            content = cand.content
-            for part in cand.content.parts or []:
-                if getattr(part, "text", None):
-                    yield {"text": part.text}
-                fc = getattr(part, "function_call", None)
-                if fc is not None:
-                    calls.append(fc)
-    yield TurnResult(content, calls, usage)
+    last_exc: Exception | None = None
+    for m in _chain(model):
+        content = None
+        usage = None
+        calls: list = []
+        produced = False
+        try:
+            stream = await client.aio.models.generate_content_stream(model=m, contents=contents, config=cfg)
+            async for chunk in stream:
+                if chunk.usage_metadata:
+                    usage = chunk.usage_metadata
+                if not chunk.candidates:
+                    continue
+                cand = chunk.candidates[0]
+                if cand.content:
+                    content = cand.content
+                    for part in cand.content.parts or []:
+                        if getattr(part, "text", None):
+                            produced = True
+                            yield {"text": part.text}
+                        fc = getattr(part, "function_call", None)
+                        if fc is not None:
+                            produced = True
+                            calls.append(fc)
+            yield TurnResult(content, calls, usage)
+            return
+        except Exception as exc:  # noqa: BLE001
+            # Only fall back if nothing was emitted yet (a clean quota refusal).
+            if produced or not _is_quota(exc):
+                raise
+            log.warning("gemini %s quota hit (stream), trying next model", m)
+            last_exc = exc
+    raise last_exc  # type: ignore[misc]
 
 
 def function_response(name: str, result: Any):
