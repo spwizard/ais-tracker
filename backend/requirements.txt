@@ -8,6 +8,7 @@ shapely>=2.0
 aiomqtt>=2.0
 pyais>=2.6
 anthropic>=0.69
+google-genai>=1.0
 h3>=4.1
 xarray>=2024.1
 cfgrib>=0.9

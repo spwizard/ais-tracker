@@ -92,6 +92,8 @@ export interface LayerOptions {
   highlightColor: [number, number, number];
   // Sanctioned / behaviorally-flagged vessels to ring in red.
   flaggedMmsis: Set<number>;
+  // Vessels the AI analyst is currently pointing at (cyan rings).
+  analystMmsis: Set<number>;
   // When set, the heatmap renders these historical density cells instead of the
   // live fleet, and live icons/trails are hidden (timeline scrubbing).
   densityOverride: DensityPoint[] | null;
@@ -125,6 +127,7 @@ export function buildLayers(opts: LayerOptions) {
     highlightTrack,
     highlightColor,
     flaggedMmsis,
+    analystMmsis,
     densityOverride,
     showWind,
     windImage,
@@ -189,10 +192,18 @@ export function buildLayers(opts: LayerOptions) {
 
   // Zoom-driven cross-fade: icons in close, density heatmap far out.
   // Density mode (or viewing history) forces the heatmap fully on.
+  //
+  // Exception: while the analyst is pointing at vessels, keep the icon view even
+  // if it flew the camera way out — otherwise the zoom-driven heatmap would
+  // swallow the very vessels (and cyan rings) it's highlighting. The explicit
+  // density toggle and timeline scrubbing still take precedence.
+  const analystActive = analystMmsis.size > 0;
   const iconOpacity =
     densityMode || history
       ? 0
-      : clamp01((zoom - HEAT_FULL) / (ICON_FULL - HEAT_FULL));
+      : analystActive
+        ? 1
+        : clamp01((zoom - HEAT_FULL) / (ICON_FULL - HEAT_FULL));
   const heatOpacity = densityMode || history ? 1 : 1 - iconOpacity;
 
   // 3D models replace flat icons for fishing vessels when zoomed in.
@@ -357,6 +368,34 @@ export function buildLayers(opts: LayerOptions) {
   const iconData = modelsActive
     ? data.filter((d) => !MODEL_GROUPS.has(groupKeyFor(d.ship_type)))
     : data;
+
+  // Cyan "the analyst is pointing here" rings — a steady ring that breathes
+  // slowly, visually distinct from the red flagged pulse and the blue selection.
+  if (iconOpacity > 0.01 && analystMmsis.size > 0) {
+    const cited = data.filter((d) => analystMmsis.has(d.mmsi));
+    if (cited.length > 0) {
+      const breathe = 0.5 + 0.5 * Math.sin(currentTime * 1.6);
+      layers.push(
+        new ScatterplotLayer<TrackedVessel>({
+          id: "analyst-rings",
+          data: cited,
+          getPosition: (d) =>
+            deadReckon(d.lat as number, d.lon as number, d.cog, d.sog, currentTime - d.ts),
+          stroked: true,
+          filled: false,
+          getLineColor: [34, 211, 238, Math.round(170 + breathe * 85)],
+          lineWidthMinPixels: 2,
+          getRadius: 22 + breathe * 3,
+          radiusUnits: "pixels",
+          updateTriggers: {
+            getPosition: currentTime,
+            getRadius: currentTime,
+            getLineColor: currentTime,
+          },
+        }),
+      );
+    }
+  }
 
   // Red warning ring around sanctioned / flagged vessels.
   if (iconOpacity > 0.01 && flaggedMmsis.size > 0) {

@@ -17,7 +17,8 @@ export interface Filters {
   groups: Set<string>;
   /** [minKnots, maxKnots]. */
   speed: [number, number];
-  /** Free-text match on name or MMSI. */
+  /** Free-text finder query (name or MMSI). Drives the results list, not the
+   *  map predicate — searching locates vessels rather than hiding the rest. */
   search: string;
 }
 
@@ -55,10 +56,35 @@ export function matchesFilter(v: TrackedVessel, f: Filters): boolean {
   if (sog < f.speed[0]) return false;
   if (f.speed[1] < SPEED_MAX && sog > f.speed[1]) return false;
 
-  if (f.search) {
-    const q = f.search.toLowerCase();
-    const name = (v.name ?? "").toLowerCase();
-    if (!name.includes(q) && !String(v.mmsi).includes(q)) return false;
-  }
   return true;
+}
+
+export interface VesselMatch {
+  vessel: TrackedVessel;
+  score: number;
+}
+
+/** Rank vessels against a finder query (name or MMSI). Exact → prefix →
+ *  substring; name matches rank above MMSI matches. Empty query → []. */
+export function searchVessels(vessels: TrackedVessel[], query: string): TrackedVessel[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
+  const scored: VesselMatch[] = [];
+  for (const v of vessels) {
+    const name = (v.name ?? "").toLowerCase();
+    const mmsi = String(v.mmsi);
+    let score = -1;
+    if (name === q || mmsi === q) score = 0;
+    else if (name.startsWith(q)) score = 1;
+    else if (mmsi.startsWith(q)) score = 2;
+    else if (name && name.includes(q)) score = 3;
+    else if (mmsi.includes(q)) score = 4;
+    if (score >= 0) scored.push({ vessel: v, score });
+  }
+  scored.sort(
+    (a, b) =>
+      a.score - b.score ||
+      (a.vessel.name ?? "~").localeCompare(b.vessel.name ?? "~"),
+  );
+  return scored.map((s) => s.vessel);
 }

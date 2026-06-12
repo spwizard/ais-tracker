@@ -7,6 +7,7 @@ import {
   Activity,
   Layers,
   Hexagon,
+  Sparkles,
   Sun,
   Moon,
   type LucideIcon,
@@ -49,6 +50,7 @@ const DOCK: { id: PanelId; icon: LucideIcon; label: string }[] = [
   { id: "layers", icon: Layers, label: "Layers & regions" },
   { id: "zones", icon: Hexagon, label: "Zones & geofences" },
   { id: "detail", icon: Ship, label: "Vessel details" },
+  { id: "analyst", icon: Sparkles, label: "AI Analyst" },
 ];
 
 export function TopBar({

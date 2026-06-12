@@ -69,6 +69,22 @@ class Settings(BaseSettings):
     tavily_api_key: str = Field(default="", alias="TAVILY_API_KEY")
     anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
 
+    # --- AI analyst (conversational tool loop over the live picture) -------
+    # Sonnet by default: the chat wants low latency and runs several tool
+    # rounds per question; bump to opus via env if depth beats speed.
+    analyst_model: str = Field(default="claude-sonnet-4-6", alias="ANALYST_MODEL")
+
+    # --- LLM provider -----------------------------------------------------
+    # Which backend powers the briefing + analyst: "gemini" or "anthropic".
+    # Flip back to Anthropic by setting LLM_PROVIDER=anthropic.
+    llm_provider: str = Field(default="gemini", alias="LLM_PROVIDER")
+    gemini_api_key: str = Field(default="", alias="GEMINI_API_KEY")
+    # 2.5-pro is not on the free tier (quota 0); flash works there and is plenty
+    # for a structured briefing with a thinking budget. Bump to pro once billed.
+    gemini_briefing_model: str = Field(default="gemini-2.5-flash", alias="GEMINI_BRIEFING_MODEL")
+    gemini_analyst_model: str = Field(default="gemini-2.5-flash", alias="GEMINI_ANALYST_MODEL")
+    gemini_search_model: str = Field(default="gemini-2.5-flash-lite", alias="GEMINI_SEARCH_MODEL")
+
     # --- Geofences ---------------------------------------------------------
     geofence_path: str = Field(default="data/geofences.json", alias="GEOFENCE_PATH")
     geofence_eval_sec: float = Field(default=2.0, alias="GEOFENCE_EVAL_SEC")

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
-export type PanelId = "filters" | "stats" | "layers" | "detail" | "zones";
+export type PanelId = "filters" | "stats" | "layers" | "detail" | "zones" | "analyst";
 
 export const PANEL_IDS: PanelId[] = [
   "filters",
@@ -8,6 +8,7 @@ export const PANEL_IDS: PanelId[] = [
   "layers",
   "detail",
   "zones",
+  "analyst",
 ];
 
 /** Render widths (must match each panel's FloatingPanel `width`). */
@@ -17,6 +18,7 @@ export const PANEL_W: Record<PanelId, number> = {
   layers: 240,
   detail: 320,
   zones: 288,
+  analyst: 380,
 };
 
 /** Approximate heights — used only for non-overlap placement math. */
@@ -26,6 +28,7 @@ export const PANEL_EST_H: Record<PanelId, number> = {
   layers: 175,
   detail: 380,
   zones: 360,
+  analyst: 540,
 };
 
 const MARGIN = 16;
@@ -35,6 +38,7 @@ export interface PanelState {
   open: boolean;
   x: number;
   y: number;
+  pinned?: boolean; // locked in place: not draggable, never auto-repositioned
 }
 export type PanelMap = Record<PanelId, PanelState>;
 
@@ -73,6 +77,11 @@ function defaults(): PanelMap {
     zones: {
       open: false,
       x: vw - MARGIN - PANEL_W.zones,
+      y: MARGIN + PANEL_EST_H.stats + GAP,
+    },
+    analyst: {
+      open: false,
+      x: vw - MARGIN - PANEL_W.analyst,
       y: MARGIN + PANEL_EST_H.stats + GAP,
     },
   };
@@ -154,6 +163,10 @@ export function usePanels() {
     setPanels((prev) => ({ ...prev, [id]: { ...prev[id], open: !prev[id].open } }));
   }, []);
 
+  const togglePin = useCallback((id: PanelId) => {
+    setPanels((prev) => ({ ...prev, [id]: { ...prev[id], pinned: !prev[id].pinned } }));
+  }, []);
+
   const move = useCallback((id: PanelId, x: number, y: number) => {
     setPanels((prev) => ({ ...prev, [id]: { ...prev[id], x, y } }));
   }, []);
@@ -175,6 +188,7 @@ export function usePanels() {
    */
   const autoPlace = useCallback((id: PanelId) => {
     setPanels((prev) => {
+      if (prev[id].pinned) return prev; // pinned panels stay exactly where they are
       const { vw, vh } = viewport();
       const w = PANEL_W[id];
       const h = Math.min(PANEL_EST_H[id], vh - 2 * MARGIN);
@@ -194,5 +208,5 @@ export function usePanels() {
     });
   }, []);
 
-  return { panels, setOpen, toggle, move, focus, zIndexOf, autoPlace };
+  return { panels, setOpen, toggle, togglePin, move, focus, zIndexOf, autoPlace };
 }

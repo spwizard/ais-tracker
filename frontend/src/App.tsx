@@ -18,6 +18,8 @@ import { OwnershipGraph } from "@/panels/OwnershipGraph";
 import { DensityTimeline } from "@/panels/DensityTimeline";
 import { ForecastTimeline } from "@/panels/ForecastTimeline";
 import { MapLegend } from "@/panels/MapLegend";
+import { AnalystPanel } from "@/panels/AnalystPanel";
+import { useAnalyst, type MapDirective } from "@/hooks/useAnalyst";
 import { useDensity } from "@/hooks/useDensity";
 import { useWeather, useWaves } from "@/hooks/useWeather";
 import { useFlag } from "@/hooks/useFlags";
@@ -47,7 +49,8 @@ const TRAIL_WINDOW_SEC = 900; // trails fade over the last 15 minutes
 export default function App() {
   const { vesselsRef, version, status, events, riskEvents, flagged } =
     useVesselsSocket();
-  const { panels, setOpen, toggle, move, focus, zIndexOf, autoPlace } = usePanels();
+  const { panels, setOpen, toggle, togglePin, move, focus, zIndexOf, autoPlace } =
+    usePanels();
   const { theme, toggle: toggleTheme } = useTheme();
   const sources = useSources();
 
@@ -214,6 +217,34 @@ export default function App() {
     }
   };
 
+  // --- AI analyst ---------------------------------------------------------
+  const [analystMmsis, setAnalystMmsis] = useState<Set<number>>(new Set());
+  const onAnalystMap = useCallback(
+    (d: MapDirective) => {
+      if (d.mmsis) setAnalystMmsis(new Set(d.mmsis));
+      // Prefer framing the cited vessels by their actual live positions — tight
+      // and precise, and fitBounds caps the zoom so it never dives into the
+      // heatmap regime. Fall back to the model's coarse area hint only when no
+      // cited vessel is locatable.
+      const pts: [number, number][] = [];
+      for (const m of d.mmsis ?? []) {
+        const v = vesselsRef.current.get(m);
+        if (v && v.lon != null && v.lat != null) pts.push([v.lon, v.lat]);
+      }
+      if (pts.length > 0) {
+        mapRef.current?.fitBounds(pts);
+      } else if (d.lat != null && d.lon != null) {
+        mapRef.current?.flyTo({ longitude: d.lon, latitude: d.lat, zoom: d.zoom ?? 9 });
+      }
+    },
+    [vesselsRef],
+  );
+  const analyst = useAnalyst(onAnalystMap);
+  // Closing the panel clears the analyst's rings.
+  useEffect(() => {
+    if (!panels.analyst.open) setAnalystMmsis(new Set());
+  }, [panels.analyst.open]);
+
   // Which graph vessels are currently live (clickable) — snapshot while open.
   const liveMmsis = useMemo(
     () =>
@@ -288,6 +319,8 @@ export default function App() {
     onClose: () => setOpen(id, false),
     onFocus: () => focus(id),
     zIndex: zIndexOf(id),
+    pinned: panels[id].pinned,
+    onTogglePin: () => togglePin(id),
   });
 
   const handleJump = (t: ViewTarget) => mapRef.current?.flyTo(t);
@@ -311,6 +344,7 @@ export default function App() {
         }
         highlightColor={highlightColor}
         flaggedMmsis={flagged}
+        analystMmsis={analystMmsis}
         densityOverride={densityOverride}
         showWind={showWind}
         windImage={weather.image}
@@ -344,6 +378,7 @@ export default function App() {
             layers: panels.layers.open,
             detail: panels.detail.open,
             zones: panels.zones.open,
+            analyst: panels.analyst.open,
           }}
           onTogglePanel={(id) => {
             if (id === "detail" && selectedMmsi == null) return;
@@ -364,6 +399,8 @@ export default function App() {
             filters={filters}
             onChange={setFilters}
             countsByGroup={countsByGroup}
+            vessels={allVessels}
+            onSelectVessel={(v) => selectByMmsi(v.mmsi)}
           />
         )}
         {panels.stats.open && (
@@ -425,6 +462,17 @@ export default function App() {
             onSetMode={setDrawMode}
             category={drawCategory}
             onSetCategory={setDrawCategory}
+          />
+        )}
+        {panels.analyst.open && (
+          <AnalystPanel
+            chrome={chromeFor("analyst")}
+            messages={analyst.messages}
+            busy={analyst.busy}
+            onSend={analyst.send}
+            onStop={analyst.stop}
+            onClear={analyst.clear}
+            onVessel={selectByMmsi}
           />
         )}
 

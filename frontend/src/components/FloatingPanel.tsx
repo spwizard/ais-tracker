@@ -1,5 +1,5 @@
 import { useCallback, useRef, type ReactNode } from "react";
-import { X, GripVertical, type LucideIcon } from "lucide-react";
+import { X, GripVertical, Pin, type LucideIcon } from "lucide-react";
 import { Hint } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
@@ -9,6 +9,8 @@ export interface PanelChrome {
   onClose: () => void;
   onFocus: () => void;
   zIndex: number;
+  pinned?: boolean;
+  onTogglePin?: () => void;
 }
 
 interface FloatingPanelProps extends PanelChrome {
@@ -35,6 +37,8 @@ export function FloatingPanel({
   onClose,
   onFocus,
   zIndex,
+  pinned = false,
+  onTogglePin,
   width = 288,
   actions,
   className,
@@ -44,13 +48,14 @@ export function FloatingPanel({
 
   const onPointerDown = useCallback(
     (e: React.PointerEvent) => {
-      // Ignore drags that start on a button inside the header (e.g. close).
-      if ((e.target as HTMLElement).closest("[data-no-drag]")) return;
+      // Pinned panels are locked; ignore drags (and drags starting on a header
+      // button, e.g. close/pin).
+      if (pinned || (e.target as HTMLElement).closest("[data-no-drag]")) return;
       onFocus();
       dragRef.current = { dx: e.clientX - position.x, dy: e.clientY - position.y };
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     },
-    [position.x, position.y, onFocus],
+    [pinned, position.x, position.y, onFocus],
   );
 
   const onPointerMove = useCallback(
@@ -83,19 +88,44 @@ export function FloatingPanel({
     >
       {/* Drag handle / header */}
       <div
-        className="flex cursor-grab items-center gap-2 border-b border-foreground/5 px-3 py-2.5 active:cursor-grabbing"
+        className={cn(
+          "flex items-center gap-2 border-b border-foreground/5 px-3 py-2.5",
+          pinned ? "cursor-default" : "cursor-grab active:cursor-grabbing",
+        )}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
       >
-        <GripVertical className="h-3.5 w-3.5 shrink-0 text-muted-foreground/50" />
+        <GripVertical
+          className={cn(
+            "h-3.5 w-3.5 shrink-0 text-muted-foreground/50",
+            pinned && "opacity-30",
+          )}
+        />
         <Icon className="h-4 w-4 shrink-0 text-primary" />
         <span className="flex-1 truncate text-sm font-semibold tracking-tight">
           {title}
         </span>
         <div className="flex items-center gap-0.5" data-no-drag>
           {actions}
+          {onTogglePin && (
+            <Hint label={pinned ? "Unpin (allow dragging)" : "Pin in place"} side="bottom">
+              <button
+                onClick={onTogglePin}
+                className={cn(
+                  "grid h-6 w-6 place-items-center rounded-md transition-colors",
+                  pinned
+                    ? "text-primary hover:bg-primary/10"
+                    : "text-muted-foreground hover:bg-foreground/10 hover:text-foreground",
+                )}
+                aria-label={pinned ? `Unpin ${title}` : `Pin ${title}`}
+                aria-pressed={pinned}
+              >
+                <Pin className={cn("h-3.5 w-3.5", pinned && "fill-current")} />
+              </button>
+            </Hint>
+          )}
           <Hint label="Close panel" side="bottom">
             <button
               onClick={onClose}

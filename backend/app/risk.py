@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import math
 import time
+from collections import deque
 
 log = logging.getLogger("risk")
 
@@ -53,10 +54,31 @@ class RiskEngine:
         self._pair_fired: set[tuple[int, int]] = set()
         # recent behavioral events per mmsi (for the risk score)
         self._recent: dict[int, list[dict]] = {}
+        # rolling fleet-wide event log (for the analyst's recent_events tool)
+        self._event_log: deque[dict] = deque(maxlen=500)
 
     def recent_for(self, mmsi: int) -> list[dict]:
         cutoff = time.time() - RECENT_WINDOW_SEC
         return [e for e in self._recent.get(mmsi, ()) if e["ts"] >= cutoff]
+
+    def recent_events(self, hours: float = 24.0) -> list[dict]:
+        """Fleet-wide behavioral events from the last `hours`, newest first."""
+        cutoff = time.time() - hours * 3600.0
+        return [e for e in reversed(self._event_log) if e["ts"] >= cutoff]
+
+    async def flagged_set(self, snap=None) -> set[int]:
+        """MMSIs currently worth highlighting: recent behavioral flags plus
+        sanctions-listed vessels in view."""
+        if snap is None:
+            snap = await self._store.snapshot()
+        flagged = set(self._recent.keys())
+        if self._sanctions and self._sanctions.loaded:
+            for v in snap:
+                if self._sanctions.screen_vessel(
+                    imo=v.imo, mmsi=v.mmsi, callsign=v.callsign, by_name=False
+                ):
+                    flagged.add(v.mmsi)
+        return flagged
 
     async def evaluate(self) -> None:
         snap = await self._store.snapshot()
@@ -69,6 +91,7 @@ class RiskEngine:
             for m in (ev["mmsi"], ev.get("mmsi_b")):
                 if m:
                     self._recent.setdefault(m, []).append({"kind": ev["kind"], "ts": now})
+            self._event_log.append(ev)
             await self._b.send_frame(ev)
         self._prune_recent(now)
         await self._broadcast_flagged(snap, now)
@@ -85,15 +108,8 @@ class RiskEngine:
                 del self._recent[mmsi]
 
     async def _broadcast_flagged(self, snap, now: float) -> None:
-        """Set of MMSIs worth highlighting: sanctioned vessels currently in view
-        + anything with a recent behavioral flag."""
-        flagged = set(self._recent.keys())
-        if self._sanctions and self._sanctions.loaded:
-            for v in snap:
-                if self._sanctions.screen_vessel(
-                    imo=v.imo, mmsi=v.mmsi, callsign=v.callsign, by_name=False
-                ):
-                    flagged.add(v.mmsi)
+        """Broadcast the set of MMSIs worth highlighting (see flagged_set)."""
+        flagged = await self.flagged_set(snap)
         await self._b.send_frame({"type": "flagged", "mmsis": sorted(flagged)})
 
     # --- spoof / impossible movement -------------------------------------

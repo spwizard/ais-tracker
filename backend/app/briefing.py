@@ -92,6 +92,15 @@ def _friendly_error(exc: Exception) -> str:
     return "Claude API error — see server logs."
 
 
+def _gemini_error(exc: Exception) -> str:
+    msg = str(exc).lower()
+    if "quota" in msg or "resource_exhausted" in msg or "429" in msg:
+        return "Gemini API quota exceeded — check your Google AI Studio quota."
+    if "api key" in msg or "permission" in msg or "unauthenticated" in msg or "403" in msg:
+        return "Gemini API key invalid — check GEMINI_API_KEY."
+    return "Gemini API error — see server logs."
+
+
 SYSTEM_PROMPT = """\
 You are a senior maritime risk analyst. You write briefings on individual \
 vessels for a sanctions-compliance and dark-activity monitoring team. Your \
@@ -179,12 +188,20 @@ class BriefingService:
         web_search: bool = True,
         search_model: str = "claude-haiku-4-5",
         tavily_key: str = "",
+        provider: str = "anthropic",
+        gemini_key: str = "",
+        gemini_model: str = "gemini-2.5-pro",
+        gemini_search_model: str = "gemini-2.5-flash-lite",
     ) -> None:
         self._model = model
         self._search_model = search_model
         self._api_key = api_key or None  # None → SDK resolves from env
         self._web = web_search
         self._tavily_key = tavily_key
+        self._provider = provider
+        self._gemini_key = gemini_key
+        self._gemini_model = gemini_model
+        self._gemini_search_model = gemini_search_model
         self._client: anthropic.AsyncAnthropic | None = None
         self._cache: dict[str, dict] = {}
 
@@ -364,6 +381,27 @@ class BriefingService:
             f"Vessel: {name}{imo}\n\nWeb search results:\n{formatted}\n\n"
             "Extract the noteworthy maritime findings, citing the source url for each."
         )
+
+        if self._provider == "gemini":
+            from .llm_gemini import generate_structured, cost as gcost, tokens as gtokens
+
+            try:
+                out, usage = await generate_structured(
+                    self._gemini_key, self._gemini_search_model, WEB_SYNTH_PROMPT,
+                    user, OpenSourceList, max_output_tokens=2000, thinking_budget=0,
+                )
+            except Exception as exc:  # noqa: BLE001
+                log.warning("web synthesis (gemini) failed (continuing): %s", exc)
+                return {**self._EMPTY_WEB, "sources": sources, "searches": 1}
+            open_source = [f.model_dump() for f in out.findings] if out else []
+            return {
+                "open_source": open_source,
+                "sources": sources,
+                "cost": gcost(self._gemini_search_model, usage),
+                "searches": 1,
+                "tokens": gtokens(usage),
+            }
+
         client = self._ensure_client()
         try:
             resp = await client.with_options(timeout=40).messages.parse(
@@ -424,9 +462,8 @@ class BriefingService:
         if key in self._cache:
             return self._cache[key]
 
-        client = self._ensure_client()
         # Web open-source enrichment runs independently of the deterministic
-        # briefing (Tavily search + a cheap model), so the Opus call stays focused.
+        # briefing (Tavily search + a cheap model), so the main call stays focused.
         web = await self._web_research(vessel, use_web)
         user = (
             "Produce a risk briefing for the vessel described by the evidence pack "
@@ -434,45 +471,63 @@ class BriefingService:
             "risk level and findings solely on this evidence.\n\n"
             f"<evidence_pack>\n{json.dumps(evidence, indent=2)}\n</evidence_pack>"
         )
-        try:
-            resp = await client.with_options(timeout=120).messages.parse(
-                model=self._model,
-                max_tokens=6000,
-                thinking={"type": "adaptive"},
-                system=[
-                    {
-                        "type": "text",
-                        "text": SYSTEM_PROMPT,
-                        # Static prefix → cached across briefings (per-request
-                        # variation lives entirely in the user turn below).
-                        "cache_control": {"type": "ephemeral"},
-                    }
-                ],
-                messages=[{"role": "user", "content": user}],
-                output_format=Briefing,
+
+        if self._provider == "gemini":
+            from .llm_gemini import generate_structured, cost as gcost, tokens as gtokens
+
+            try:
+                briefing, usage = await generate_structured(
+                    self._gemini_key, self._gemini_model, SYSTEM_PROMPT, user,
+                    Briefing, max_output_tokens=8000, thinking_budget=2048,
+                )
+            except Exception as exc:  # noqa: BLE001
+                log.warning("briefing (gemini) error: %s", exc)
+                raise BriefingUnavailable(_gemini_error(exc)) from exc
+            if briefing is None:
+                raise BriefingUnavailable("model did not return a structured briefing")
+            log.info("briefing for %s (gemini): %d findings", vessel.mmsi, len(briefing.findings))
+            synth_cost = gcost(self._gemini_model, usage)
+            synth_tokens = gtokens(usage)
+        else:
+            client = self._ensure_client()
+            try:
+                resp = await client.with_options(timeout=120).messages.parse(
+                    model=self._model,
+                    max_tokens=6000,
+                    thinking={"type": "adaptive"},
+                    system=[
+                        {
+                            "type": "text",
+                            "text": SYSTEM_PROMPT,
+                            # Static prefix → cached across briefings (per-request
+                            # variation lives entirely in the user turn below).
+                            "cache_control": {"type": "ephemeral"},
+                        }
+                    ],
+                    messages=[{"role": "user", "content": user}],
+                    output_format=Briefing,
+                )
+            except anthropic.APIError as exc:
+                log.warning("briefing API error: %s", exc)
+                raise BriefingUnavailable(_friendly_error(exc)) from exc
+
+            briefing = resp.parsed_output
+            if briefing is None:
+                raise BriefingUnavailable("model did not return a structured briefing")
+
+            u = resp.usage
+            log.info(
+                "briefing for %s: %d findings · cache_read=%s input=%s output=%s",
+                vessel.mmsi,
+                len(briefing.findings),
+                getattr(u, "cache_read_input_tokens", None),
+                getattr(u, "input_tokens", None),
+                getattr(u, "output_tokens", None),
             )
-        except anthropic.APIError as exc:
-            log.warning("briefing API error: %s", exc)
-            raise BriefingUnavailable(_friendly_error(exc)) from exc
-
-        briefing = resp.parsed_output
-        if briefing is None:
-            raise BriefingUnavailable("model did not return a structured briefing")
-
-        u = resp.usage
-        log.info(
-            "briefing for %s: %d findings · cache_read=%s input=%s output=%s",
-            vessel.mmsi,
-            len(briefing.findings),
-            getattr(u, "cache_read_input_tokens", None),
-            getattr(u, "input_tokens", None),
-            getattr(u, "output_tokens", None),
-        )
-
-        synth_cost = _call_cost(self._model, u)
-        synth_tokens = (getattr(u, "input_tokens", 0) or 0) + (
-            getattr(u, "output_tokens", 0) or 0
-        )
+            synth_cost = _call_cost(self._model, u)
+            synth_tokens = (getattr(u, "input_tokens", 0) or 0) + (
+                getattr(u, "output_tokens", 0) or 0
+            )
         cost = {
             "usd": round(web["cost"] + synth_cost, 4),
             "tokens": web["tokens"] + synth_tokens,

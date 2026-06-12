@@ -23,9 +23,11 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
+from .analyst import AnalystService
 from .config import get_settings
 from .flags import get_flags
 from .geofence.evaluator import GeofenceEvaluator
@@ -215,14 +217,33 @@ async def lifespan(app: FastAPI):
     # Behavioral risk engine (rendezvous / spoof) + sanctions-aware flagging.
     app.state.risk_engine = RiskEngine(store, broadcaster, settings, sanctions)
 
-    # LLM risk briefing (lazy client — only hits Claude on demand).
+    # LLM risk briefing (lazy client — only hits the provider on demand).
     app.state.briefing = BriefingService(
         settings.briefing_model,
         settings.anthropic_api_key,
         settings.briefing_web_search,
         settings.briefing_search_model,
         settings.tavily_api_key,
+        provider=settings.llm_provider,
+        gemini_key=settings.gemini_api_key,
+        gemini_model=settings.gemini_briefing_model,
+        gemini_search_model=settings.gemini_search_model,
     )
+
+    # AI analyst — conversational tool loop over everything above.
+    app.state.analyst = AnalystService(
+        settings.analyst_model,
+        settings.anthropic_api_key,
+        provider=settings.llm_provider,
+        gemini_key=settings.gemini_api_key,
+        gemini_model=settings.gemini_analyst_model,
+        snapshot=store.snapshot,
+        dossier=_analyst_dossier,
+        events=app.state.risk_engine.recent_events,
+        conditions=app.state.windy.forecast,
+        flagged=app.state.risk_engine.flagged_set,
+    )
+    log.info("LLM provider: %s", settings.llm_provider)
 
     sweeper = asyncio.create_task(_stale_sweeper(app), name="stale-sweeper")
     geofence_task = asyncio.create_task(_geofence_loop(app), name="geofence-eval")
@@ -460,6 +481,85 @@ async def vessel_risk(mmsi: int):
         return {"risk": compute_risk(None, None, None, [], [])}
     conditions = await _conditions_for(inputs[0])
     return {"risk": compute_risk(*inputs, conditions=conditions)}
+
+
+async def _analyst_dossier(mmsi: int) -> dict | None:
+    """Condensed all-source dossier for the analyst's vessel_dossier tool."""
+    inputs = await _assemble_risk_inputs(mmsi)
+    if inputs is None:
+        return None
+    v, own, sanctioned_vessel, owner_hits, recent = inputs
+    conditions = await _conditions_for(v)
+    risk = compute_risk(*inputs, conditions=conditions)
+    from .mid import flag_for_mmsi  # local import: avoid cycle at module load
+
+    def clean(d: dict | None, keys: tuple[str, ...]) -> dict | None:
+        if not d:
+            return None
+        out = {k: d.get(k) for k in keys if d.get(k)}
+        return out or None
+
+    return {
+        "vessel": {
+            "mmsi": v.mmsi,
+            "name": v.name,
+            "imo": v.imo,
+            "callsign": v.callsign,
+            "flag": (own or {}).get("flag") or flag_for_mmsi(v.mmsi),
+            "type_code": v.ship_type,
+            "destination": (v.destination or "").strip() or None,
+            "sog_kn": v.sog,
+            "lat": v.lat,
+            "lon": v.lon,
+        },
+        "ownership": clean(
+            own,
+            (
+                "reg_owner", "reg_owner_domicile", "reg_owner_control",
+                "operator", "operator_domicile",
+                "beneficial_owner", "beneficial_owner_domicile", "beneficial_owner_control",
+                "manager", "manager_domicile", "ex_name", "gross_tonnage",
+            ),
+        ),
+        "sanctions": {
+            "vessel_listed": bool(sanctioned_vessel),
+            "vessel_match": clean(sanctioned_vessel, ("name", "imo", "program")),
+            "sanctioned_parties": [{"role": r, "name": n} for r, n in owner_hits] or None,
+        },
+        "risk": risk,
+        "recent_events": recent or None,
+        "conditions": conditions,
+    }
+
+
+class AnalystQuery(BaseModel):
+    question: str
+    history: list[dict] = []
+
+
+@app.post("/api/analyst")
+async def analyst(q: AnalystQuery):
+    """Conversational AI analyst over the live picture (SSE stream).
+
+    Emits `data: {json}` lines — event types: delta (answer text), tool
+    (trace chip), map (highlight/fly directive), final (cost), error."""
+    if not get_flags().get("analyst"):
+        raise HTTPException(status_code=404, detail="analyst disabled")
+    question = q.question.strip()[:2000]
+    if not question:
+        raise HTTPException(status_code=422, detail="empty question")
+
+    async def gen():
+        import json as _json
+
+        async for ev in app.state.analyst.stream(question, q.history):
+            yield f"data: {_json.dumps(ev, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.post("/api/vessel/{mmsi}/briefing")
