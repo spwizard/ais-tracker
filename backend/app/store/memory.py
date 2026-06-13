@@ -14,6 +14,9 @@ from ..config import get_settings
 from ..models import Vessel, VesselUpdate
 from .base import VesselStore
 
+# Minimum spacing between trail points; collapses cross-source duplicate fixes.
+TRAIL_DEDUPE_SEC = 1.5
+
 
 class MemoryVesselStore(VesselStore):
     def __init__(self) -> None:
@@ -41,7 +44,13 @@ class MemoryVesselStore(VesselStore):
                 trail = self._trails.setdefault(
                     update.mmsi, deque(maxlen=self._trail_len)
                 )
-                trail.append([update.lon, update.lat, update.ts])
+                # De-dupe near-simultaneous reports of the same fix arriving from
+                # overlapping sources (AISStream + Kystverket + Digitraffic can
+                # all hear one vessel). A single source's cadence is >=2s, so
+                # collapsing points <1.5s apart drops only the cross-source
+                # duplicates and keeps full single-source trail resolution.
+                if not trail or (update.ts - trail[-1][2]) >= TRAIL_DEDUPE_SEC:
+                    trail.append([update.lon, update.lat, update.ts])
             return vessel
 
     async def get(self, mmsi: int) -> Vessel | None:

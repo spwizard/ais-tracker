@@ -12,10 +12,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Callable
 
 from fastapi import WebSocket
 
 log = logging.getLogger("ws.broadcaster")
+
+# Frame types that represent a persistable alert.
+_ALERT_FRAMES = ("geofence_event", "risk_event")
 
 
 class Broadcaster:
@@ -27,6 +31,8 @@ class Broadcaster:
         self._stop = asyncio.Event()
         # Track what each vessel looked like last tick to send only changes.
         self._last_sent: dict[int, float] = {}  # mmsi -> ts last broadcast
+        # Optional sink that persists alert frames (set by the app).
+        self.alert_sink: Callable[[dict], None] | None = None
 
     # --- lifecycle --------------------------------------------------------
     def start(self) -> None:
@@ -94,7 +100,13 @@ class Broadcaster:
         await self._broadcast(frame)
 
     async def send_frame(self, frame: dict) -> None:
-        """Push an out-of-band frame (e.g. a geofence event) to all clients now."""
+        """Push an out-of-band frame (e.g. a geofence event) to all clients now,
+        persisting it first if it's an alert."""
+        if self.alert_sink is not None and frame.get("type") in _ALERT_FRAMES:
+            try:
+                self.alert_sink(frame)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("alert sink failed: %s", exc)
         await self._broadcast(frame)
 
     async def _broadcast(self, frame: dict) -> None:

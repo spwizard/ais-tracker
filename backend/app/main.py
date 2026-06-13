@@ -27,6 +27,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from .alerts import AlertStore
 from .analyst import AnalystService
 from .config import get_settings
 from .flags import get_flags
@@ -214,6 +215,12 @@ async def lifespan(app: FastAPI):
     density.open()
     app.state.density = density
 
+    # Persistent alert history (risk + geofence events), fed from the broadcaster.
+    alerts = AlertStore(settings.alerts_path)
+    alerts.open()
+    app.state.alerts = alerts
+    broadcaster.alert_sink = alerts.record
+
     # Behavioral risk engine (rendezvous / spoof) + sanctions-aware flagging.
     app.state.risk_engine = RiskEngine(store, broadcaster, settings, sanctions)
 
@@ -286,6 +293,7 @@ async def lifespan(app: FastAPI):
             with contextlib.suppress(asyncio.CancelledError):
                 await weather_task
         density.close()
+        alerts.close()
         if registry_task is not None:
             registry_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -469,6 +477,29 @@ async def _assemble_risk_inputs(mmsi: int):
                 owner_hits.append((role, own[key]))
     recent = app.state.risk_engine.recent_for(mmsi)
     return v, own, sanctioned_vessel, owner_hits, recent
+
+
+@app.get("/api/alerts")
+async def alerts(
+    category: str | None = None,
+    kind: str | None = None,
+    search: str | None = None,
+    mmsi: int | None = None,
+    since: float | None = None,
+    limit: int = 100,
+    offset: int = 0,
+):
+    """Paged, filterable history of risk + geofence alerts (newest first)."""
+    return await asyncio.to_thread(
+        app.state.alerts.query,
+        category=category,
+        kind=kind,
+        search=search,
+        mmsi=mmsi,
+        since=since,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @app.get("/api/vessel/{mmsi}/risk")

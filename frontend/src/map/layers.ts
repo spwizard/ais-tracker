@@ -94,6 +94,8 @@ export interface LayerOptions {
   flaggedMmsis: Set<number>;
   // Vessels the AI analyst is currently pointing at (cyan rings).
   analystMmsis: Set<number>;
+  // Vessel currently hovered in the data table (transient white ring).
+  hoverMmsi: number | null;
   // When set, the heatmap renders these historical density cells instead of the
   // live fleet, and live icons/trails are hidden (timeline scrubbing).
   densityOverride: DensityPoint[] | null;
@@ -128,6 +130,7 @@ export function buildLayers(opts: LayerOptions) {
     highlightColor,
     flaggedMmsis,
     analystMmsis,
+    hoverMmsi,
     densityOverride,
     showWind,
     windImage,
@@ -392,6 +395,28 @@ export function buildLayers(opts: LayerOptions) {
             getRadius: currentTime,
             getLineColor: currentTime,
           },
+        }),
+      );
+    }
+  }
+
+  // Transient white ring around the vessel hovered in the data table.
+  if (hoverMmsi != null) {
+    const hv = data.find((d) => d.mmsi === hoverMmsi);
+    if (hv && hv.lat != null && hv.lon != null) {
+      layers.push(
+        new ScatterplotLayer<TrackedVessel>({
+          id: "hover-ring",
+          data: [hv],
+          getPosition: (d) =>
+            deadReckon(d.lat as number, d.lon as number, d.cog, d.sog, currentTime - d.ts),
+          stroked: true,
+          filled: false,
+          getLineColor: [255, 255, 255, 235],
+          lineWidthMinPixels: 2.5,
+          getRadius: 21,
+          radiusUnits: "pixels",
+          updateTriggers: { getPosition: currentTime },
         }),
       );
     }

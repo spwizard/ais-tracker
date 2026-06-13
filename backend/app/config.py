@@ -17,8 +17,11 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # AISStream expects bounding boxes as [[lat, lon], [lat, lon]] (SW corner, NE corner).
-# Default covers the UK and the English Channel — one of the busiest shipping regions.
-DEFAULT_BBOX = [[48.5, -8.0], [52.0, 2.5]]
+# Default covers NW Europe — Biscay / N-Iberia up to mid-Norway, the Atlantic
+# approaches across to the eastern Baltic. AISStream is a global network, so a
+# wider box just pulls in more of its stations' traffic; the overlap with the
+# Kystverket / Digitraffic feeds is merged by MMSI in the store (no dedup needed).
+DEFAULT_BBOX = [[43.0, -12.0], [63.0, 32.0]]
 
 
 class Settings(BaseSettings):
@@ -88,6 +91,9 @@ class Settings(BaseSettings):
     # --- Geofences ---------------------------------------------------------
     geofence_path: str = Field(default="data/geofences.json", alias="GEOFENCE_PATH")
     geofence_eval_sec: float = Field(default=2.0, alias="GEOFENCE_EVAL_SEC")
+
+    # --- Alerts history (persistent risk + geofence events) ----------------
+    alerts_path: str = Field(default="data/alerts.sqlite", alias="ALERTS_PATH")
 
     # --- Density timeline (spatial-temporal traffic bins) ------------------
     density_path: str = Field(default="data/density.sqlite", alias="DENSITY_PATH")

@@ -57,6 +57,7 @@ interface MapViewProps {
   highlightColor: [number, number, number];
   flaggedMmsis: Set<number>;
   analystMmsis: Set<number>;
+  hoverMmsi: number | null;
   densityOverride: DensityPoint[] | null;
   showWind: boolean;
   windImage: unknown | null;
@@ -99,6 +100,7 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
     highlightColor,
     flaggedMmsis,
     analystMmsis,
+    hoverMmsi,
     densityOverride,
     showWind,
     windImage,
@@ -250,6 +252,7 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
         highlightColor,
         flaggedMmsis,
         analystMmsis,
+        hoverMmsi,
         densityOverride,
         showWind,
         windImage,
@@ -278,6 +281,7 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
       highlightColor,
       flaggedMmsis,
       analystMmsis,
+      hoverMmsi,
       densityOverride,
       showWind,
       windImage,

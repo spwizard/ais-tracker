@@ -8,6 +8,8 @@ import {
   Layers,
   Hexagon,
   Sparkles,
+  Table2,
+  Bell,
   Sun,
   Moon,
   type LucideIcon,
@@ -33,6 +35,8 @@ interface TopBarProps {
   hasSelection: boolean;
   theme: Theme;
   onToggleTheme: () => void;
+  dataTab: "vessels" | "alerts" | null;
+  onOpenData: (tab: "vessels" | "alerts") => void;
 }
 
 const STATUS_META: Record<
@@ -65,6 +69,8 @@ export function TopBar({
   hasSelection,
   theme,
   onToggleTheme,
+  dataTab,
+  onOpenData,
 }: TopBarProps) {
   const meta = STATUS_META[status];
   const StatusIcon = meta.icon;
@@ -165,6 +171,29 @@ export function TopBar({
             </Hint>
           );
         })}
+
+        <Separator orientation="vertical" className="mx-0.5 h-7" />
+
+        {/* Data tables — open the bottom sheet */}
+        {([
+          { tab: "vessels" as const, icon: Table2, label: "Vessels table" },
+          { tab: "alerts" as const, icon: Bell, label: "Alerts log" },
+        ]).map((d) => (
+          <Hint key={d.tab} label={d.label} side="bottom">
+            <button
+              aria-label={d.label}
+              onClick={() => onOpenData(d.tab)}
+              className={cn(
+                "grid h-8 w-8 place-items-center rounded-lg transition-colors",
+                dataTab === d.tab
+                  ? "bg-primary/15 text-primary"
+                  : "text-muted-foreground hover:bg-foreground/10 hover:text-foreground",
+              )}
+            >
+              <d.icon className="h-4 w-4" />
+            </button>
+          </Hint>
+        ))}
 
         <Separator orientation="vertical" className="mx-0.5 h-7" />
 

@@ -227,6 +227,30 @@ export interface ShipTypeGroup {
   ranges: [number, number][];
 }
 
+/** A persisted alert (GET /api/alerts) — risk or geofence event. */
+export interface Alert {
+  id: number;
+  ts: number; // epoch seconds
+  category: "risk" | "geofence";
+  kind: string; // rendezvous|spoof | enter|exit|dwell|speed|dark
+  title: string | null;
+  mmsi: number | null;
+  name: string | null;
+  mmsi_b: number | null;
+  name_b: string | null;
+  lat: number | null;
+  lon: number | null;
+  fence_id: string | null;
+  fence_name: string | null;
+  fence_category: string | null;
+  detail: Record<string, number | string | null>;
+}
+
+export interface AlertsResponse {
+  total: number;
+  alerts: Alert[];
+}
+
 export type ConnectionStatus = "connecting" | "open" | "closed";
 
 /** Per-upstream-source status from GET /api/sources. */

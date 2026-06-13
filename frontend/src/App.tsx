@@ -20,6 +20,8 @@ import { ForecastTimeline } from "@/panels/ForecastTimeline";
 import { MapLegend } from "@/panels/MapLegend";
 import { AnalystPanel } from "@/panels/AnalystPanel";
 import { useAnalyst, type MapDirective } from "@/hooks/useAnalyst";
+import { DataSheet, type DataTab } from "@/panels/DataSheet";
+import type { Alert } from "@/types";
 import { useDensity } from "@/hooks/useDensity";
 import { useWeather, useWaves } from "@/hooks/useWeather";
 import { useFlag } from "@/hooks/useFlags";
@@ -245,6 +247,28 @@ export default function App() {
     if (!panels.analyst.open) setAnalystMmsis(new Set());
   }, [panels.analyst.open]);
 
+  // --- data sheet (vessels / alerts tables) -----------------------------
+  const [sheet, setSheet] = useState<{ open: boolean; tab: DataTab; minimized: boolean }>({
+    open: false,
+    tab: "vessels",
+    minimized: false,
+  });
+  const [hoverMmsi, setHoverMmsi] = useState<number | null>(null);
+  const openData = (tab: DataTab) => setSheet({ open: true, tab, minimized: false });
+  const onTableSelectVessel = (mmsi: number) => {
+    selectByMmsi(mmsi); // select + fly + open detail
+    setSheet((s) => ({ ...s, minimized: true })); // drop the sheet to a bar
+    setHoverMmsi(null);
+  };
+  const onSelectAlert = (a: Alert) => {
+    if (a.mmsi != null && vesselsRef.current.has(a.mmsi)) {
+      selectByMmsi(a.mmsi);
+    } else if (a.lat != null && a.lon != null) {
+      mapRef.current?.flyTo({ longitude: a.lon, latitude: a.lat, zoom: 11 });
+    }
+    setSheet((s) => ({ ...s, minimized: true }));
+  };
+
   // Which graph vessels are currently live (clickable) — snapshot while open.
   const liveMmsis = useMemo(
     () =>
@@ -345,6 +369,7 @@ export default function App() {
         highlightColor={highlightColor}
         flaggedMmsis={flagged}
         analystMmsis={analystMmsis}
+        hoverMmsi={hoverMmsi}
         densityOverride={densityOverride}
         showWind={showWind}
         windImage={weather.image}
@@ -391,6 +416,8 @@ export default function App() {
           hasSelection={selectedMmsi != null}
           theme={theme}
           onToggleTheme={toggleTheme}
+          dataTab={sheet.open ? sheet.tab : null}
+          onOpenData={openData}
         />
 
         {panels.filters.open && (
@@ -519,6 +546,24 @@ export default function App() {
             raised={densityMode}
           />
         )}
+
+        <DataSheet
+          open={sheet.open}
+          tab={sheet.tab}
+          onTab={(t) => setSheet((s) => ({ ...s, tab: t, minimized: false }))}
+          onClose={() => {
+            setSheet((s) => ({ ...s, open: false }));
+            setHoverMmsi(null);
+          }}
+          minimized={sheet.minimized}
+          onSetMinimized={(v) => setSheet((s) => ({ ...s, minimized: v }))}
+          vessels={allVessels}
+          flagged={flagged}
+          selectedMmsi={selectedMmsi}
+          onHoverVessel={setHoverMmsi}
+          onSelectVessel={onTableSelectVessel}
+          onSelectAlert={onSelectAlert}
+        />
       </div>
 
       {networkMmsi != null && (
