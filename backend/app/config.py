@@ -17,11 +17,12 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # AISStream expects bounding boxes as [[lat, lon], [lat, lon]] (SW corner, NE corner).
-# Default covers NW Europe — Biscay / N-Iberia up to mid-Norway, the Atlantic
-# approaches across to the eastern Baltic. AISStream is a global network, so a
-# wider box just pulls in more of its stations' traffic; the overlap with the
-# Kystverket / Digitraffic feeds is merged by MMSI in the store (no dedup needed).
-DEFAULT_BBOX = [[43.0, -12.0], [63.0, 32.0]]
+# Default covers NW Europe + the western/central Mediterranean — the central Med
+# (35N, taking in Sicily/Malta) up to mid-Norway, the Atlantic approaches across
+# to the eastern Baltic and Aegean. AISStream is a global network, so a wider box
+# just pulls in more of its stations' traffic; the overlap with the Kystverket /
+# Digitraffic feeds is merged by MMSI in the store (no dedup needed).
+DEFAULT_BBOX = [[35.0, -12.0], [63.0, 32.0]]
 
 
 class Settings(BaseSettings):
@@ -105,8 +106,10 @@ class Settings(BaseSettings):
     weather_enabled: bool = Field(default=True, alias="WEATHER_ENABLED")
     weather_dir: str = Field(default="data/weather", alias="WEATHER_DIR")
     weather_refresh_sec: float = Field(default=10800.0, alias="WEATHER_REFRESH_SEC")  # 3h
-    # Region as W,S,E,N — covers UK/Channel + Baltic + Norway (our feeds).
-    weather_bbox_raw: str = Field(default="-12,46,32,72", alias="WEATHER_BBOX")
+    # Region as W,S,E,N — matches the AIS coverage: the central Mediterranean
+    # (35N, incl. Sicily/Malta) up to the Norwegian Sea (72N), Atlantic
+    # approaches (-12) to the eastern Baltic / Aegean (32E).
+    weather_bbox_raw: str = Field(default="-12,35,32,72", alias="WEATHER_BBOX")
     # GFS forecast hours to encode for the time scrubber (the first is "now").
     weather_forecast_hours_raw: str = Field(
         default="0,6,12,18,24,36,48", alias="WEATHER_FORECAST_HOURS"

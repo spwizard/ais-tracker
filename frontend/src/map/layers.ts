@@ -179,7 +179,7 @@ export function buildLayers(opts: LayerOptions) {
         imageType: ImageType.VECTOR,
         imageUnscale: windMeta.imageUnscale,
         bounds: windMeta.bounds,
-        numParticles: 7000, // more strands, but faint
+        numParticles: 16000, // dense strands over the wide NW-Europe+Med field
         maxAge: 60, // long, slowly-fading trails → ghostly
         speedFactor: 1.6, // slower drift
         width: 1.0, // thin
