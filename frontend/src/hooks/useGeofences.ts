@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Geofence } from "@/geofence/types";
 import { compileFence, type CompiledFence } from "@/geofence/geometry";
+import type { GeofenceSync } from "@/hooks/useVesselsSocket";
 
 const STORAGE_KEY = "ais.geofences.v1";
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
@@ -24,16 +25,20 @@ function newId(): string {
 }
 
 /**
- * Owns geofence CRUD and keeps the backend in sync (it's the authoritative
- * evaluator). Local state is the working copy + localStorage cache; on mount we
- * reconcile with the backend (adopt its fences if we have none locally), then
- * debounce-push the full set to the backend whenever it changes.
+ * Owns geofence CRUD. The **backend is the single source of truth** (it runs the
+ * evaluator that fires the alerts), shared by every client. On mount we adopt
+ * the backend's set; our own edits are debounce-pushed up and broadcast to all
+ * other browsers, whose live updates we adopt here — so fences (and their alerts)
+ * stay consistent across browsers. localStorage is only a pre-fetch/offline
+ * cache. `remote` is the live broadcast frame from the vessel socket.
  */
-export function useGeofences() {
+export function useGeofences(remote: GeofenceSync | null) {
   const [fences, setFences] = useState<Geofence[]>(loadLocal);
-  const ready = useRef(false); // gate syncing until the initial reconcile is done
+  const ready = useRef(false); // gate syncing until the initial load is done
+  const clientId = useRef(newId()); // identifies our own pushes (ignore the echo)
+  const lastSynced = useRef(""); // JSON of the set we last pushed/adopted — don't re-push it
 
-  // Reconcile with the backend once on mount.
+  // Mount: adopt the backend's shared set (or migrate ours up if it's empty).
   useEffect(() => {
     let cancelled = false;
     fetch(`${API_URL}/api/geofences`)
@@ -41,9 +46,11 @@ export function useGeofences() {
       .then((d: { geofences: Geofence[] }) => {
         if (cancelled) return;
         const backend = d.geofences ?? [];
-        // If we have nothing locally, adopt the backend's set; otherwise our
-        // local set wins and will be pushed up by the sync effect below.
-        setFences((local) => (local.length === 0 && backend.length > 0 ? backend : local));
+        if (backend.length > 0) {
+          lastSynced.current = JSON.stringify(backend); // adopted — don't echo back
+          setFences(backend);
+        }
+        // backend empty → keep local; the push effect migrates it up.
       })
       .catch(() => void 0)
       .finally(() => {
@@ -54,7 +61,15 @@ export function useGeofences() {
     };
   }, []);
 
-  // Debounced push of the full fence list to the backend (+ localStorage cache).
+  // Adopt a live set broadcast by *another* browser.
+  useEffect(() => {
+    if (!remote || remote.origin === clientId.current) return;
+    const json = JSON.stringify(remote.geofences);
+    lastSynced.current = json; // adopted — don't push it straight back
+    setFences((prev) => (json === JSON.stringify(prev) ? prev : remote.geofences));
+  }, [remote]);
+
+  // Persist to localStorage + debounce-push our own changes to the backend.
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(fences));
@@ -62,11 +77,14 @@ export function useGeofences() {
       /* ignore */
     }
     if (!ready.current) return;
+    const json = JSON.stringify(fences);
+    if (json === lastSynced.current) return; // unchanged, or we just adopted it
     const t = setTimeout(() => {
-      fetch(`${API_URL}/api/geofences`, {
+      lastSynced.current = json;
+      fetch(`${API_URL}/api/geofences?origin=${clientId.current}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(fences),
+        body: json,
       }).catch(() => void 0);
     }, 500);
     return () => clearTimeout(t);

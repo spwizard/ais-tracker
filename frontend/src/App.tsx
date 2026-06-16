@@ -49,7 +49,7 @@ function fenceName(cat: FenceCategory, fences: Geofence[]): string {
 const TRAIL_WINDOW_SEC = 900; // trails fade over the last 15 minutes
 
 export default function App() {
-  const { vesselsRef, version, status, events, riskEvents, flagged } =
+  const { vesselsRef, version, status, events, riskEvents, flagged, geofenceSync } =
     useVesselsSocket();
   const { panels, setOpen, toggle, togglePin, move, focus, zIndexOf, autoPlace } =
     usePanels();
@@ -96,7 +96,7 @@ export default function App() {
   const mapRef = useRef<MapHandle>(null);
 
   // --- geofences --------------------------------------------------------
-  const { fences, compiled, add, update, remove } = useGeofences();
+  const { fences, compiled, add, update, remove } = useGeofences(geofenceSync);
   const [drawMode, setDrawMode] = useState<FenceShape | null>(null);
   const [drawCategory, setDrawCategory] = useState<FenceCategory>("custom");
   const [selectedFenceId, setSelectedFenceId] = useState<string | null>(null);

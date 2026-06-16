@@ -7,6 +7,13 @@ import type {
   TrackedVessel,
   Vessel,
 } from "@/types";
+import type { Geofence } from "@/geofence/types";
+
+/** A live geofence-set update broadcast by the backend (sender tagged). */
+export interface GeofenceSync {
+  geofences: Geofence[];
+  origin?: string;
+}
 
 const MAX_EVENTS = 60; // most recent events kept client-side
 
@@ -33,6 +40,7 @@ export function useVesselsSocket() {
   const [events, setEvents] = useState<GeofenceEvent[]>([]);
   const [riskEvents, setRiskEvents] = useState<RiskEvent[]>([]);
   const [flagged, setFlagged] = useState<Set<number>>(new Set());
+  const [geofenceSync, setGeofenceSync] = useState<GeofenceSync | null>(null);
 
   // Coalesce many incoming frames into a single render per frame.
   const dirtyRef = useRef(false);
@@ -103,6 +111,12 @@ export function useVesselsSocket() {
         } else if (frame.type === "flagged") {
           setFlagged(new Set(frame.mmsis));
           return;
+        } else if (frame.type === "geofences") {
+          setGeofenceSync({
+            geofences: frame.geofences as Geofence[],
+            origin: frame.origin,
+          });
+          return;
         }
         scheduleRender();
       };
@@ -136,5 +150,5 @@ export function useVesselsSocket() {
     };
   }, [applyVessel, scheduleRender]);
 
-  return { vesselsRef, version, status, events, riskEvents, flagged };
+  return { vesselsRef, version, status, events, riskEvents, flagged, geofenceSync };
 }

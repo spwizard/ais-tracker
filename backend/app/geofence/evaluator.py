@@ -22,6 +22,19 @@ log = logging.getLogger("geofence.evaluator")
 
 EARTH_R = 6_371_000.0
 
+# "Dwell" and "gone dark" are only meaningful for substantial commercial vessels
+# — leisure/fishing/small craft drop AIS routinely and loiter, which floods busy
+# coastal zones with noise. Restrict those two triggers to high-speed craft,
+# tugs/special, passenger, cargo and tankers (AIS type 40–89). Enter/exit/speed
+# stay unrestricted (those can be deliberately aimed at small craft).
+def _substantial(ship_type) -> bool:
+    return ship_type is not None and 40 <= ship_type <= 89
+
+
+# A few minutes of AIS silence is routine, not "gone dark". Floor the dark window
+# so a short per-fence setting can't fire on brief gaps.
+DARK_MIN_SEC = 600  # 10 min
+
 
 def _forward(lon: float, lat: float, bearing: float, dist_m: float) -> tuple[float, float]:
     """Project a point along a bearing (radians) by dist_m. Returns (lon, lat)."""
@@ -147,9 +160,9 @@ class GeofenceEvaluator:
                     continue
                 key = (v.mmsi, fid)
 
-                # Dwell: still inside after the threshold.
+                # Dwell: a substantial vessel still inside after the threshold.
                 dwell = f.dwell_sec()
-                if dwell and key not in self._dwell_fired:
+                if dwell and _substantial(v.ship_type) and key not in self._dwell_fired:
                     if now - self._entered_at.get(key, now) >= dwell:
                         self._dwell_fired.add(key)
                         if emit:
@@ -173,7 +186,8 @@ class GeofenceEvaluator:
                 # when the fence was created gets a full grace period (it didn't
                 # "go dark" on our watch until darkSec passes).
                 dark = f.dark_sec()
-                if dark is not None:
+                if dark is not None and _substantial(v.ship_type):
+                    dark = max(dark, DARK_MIN_SEC)
                     watch_start = self._entered_at.get(key, now)
                     silent = now - max(v.ts, watch_start) >= dark
                     if silent and key not in self._dark_fired:

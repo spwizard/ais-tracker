@@ -218,7 +218,8 @@ export type ServerFrame =
   | { type: "update"; vessels: Vessel[]; removed: number[] }
   | GeofenceEvent
   | RiskEvent
-  | { type: "flagged"; mmsis: number[] };
+  | { type: "flagged"; mmsis: number[] }
+  | { type: "geofences"; geofences: unknown[]; origin?: string };
 
 export interface ShipTypeGroup {
   key: string;

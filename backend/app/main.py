@@ -649,13 +649,22 @@ async def list_geofences():
 
 
 @app.put("/api/geofences")
-async def replace_geofences(fences: list[Geofence]):
-    """Bulk-replace the geofence set (the frontend syncs its full list)."""
+async def replace_geofences(fences: list[Geofence], origin: str = ""):
+    """Bulk-replace the geofence set (the frontend syncs its full list). The new
+    set is broadcast to every connected client so all browsers stay in sync;
+    `origin` identifies the sender so it can ignore its own echo."""
     store: GeofenceStore = app.state.geofence_store
     store.replace_all(fences)
     app.state.evaluator.set_fences(store.list())
     # Seed membership for the new set without firing a burst of stale events.
     await app.state.evaluator.evaluate(emit=False)
+    await app.state.broadcaster.send_frame(
+        {
+            "type": "geofences",
+            "geofences": [f.model_dump() for f in store.list()],
+            "origin": origin,
+        }
+    )
     return {"ok": True, "count": len(fences)}
 
 
