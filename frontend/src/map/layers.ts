@@ -23,9 +23,11 @@ const MODEL_GROUPS = new Set(Object.keys(MODEL_REGISTRY));
 
 const MODEL_MIN_ZOOM = 11.5; // below this, the flat icon is used
 // Sized by pixel bounds so the model is visible regardless of its native units.
-const MODEL_SIZE_SCALE = 200;
-const MODEL_MIN_PX = 48;
-const MODEL_MAX_PX = 150;
+// Capped fairly small so the models stay in scale with the map's buildings when
+// zoomed right in (3D), rather than dwarfing them.
+const MODEL_SIZE_SCALE = 110;
+const MODEL_MIN_PX = 24;
+const MODEL_MAX_PX = 72;
 
 // Cross-fade between the density heatmap (zoomed out) and vessel icons (zoomed
 // in). Icons are full above ICON_FULL; heatmap is full below HEAT_FULL.
