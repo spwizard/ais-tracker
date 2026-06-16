@@ -422,8 +422,12 @@ export function buildLayers(opts: LayerOptions) {
     }
   }
 
-  // Red warning ring around sanctioned / flagged vessels.
-  if (iconOpacity > 0.01 && flaggedMmsis.size > 0) {
+  // Red warning ring around sanctioned / flagged vessels. Drawn regardless of
+  // zoom — high-risk vessels must stay visible even when the view zooms out far
+  // enough (over the wide NW-Europe+Med area) for the density heatmap to take
+  // over the icons. Suppressed only while scrubbing a historical bucket, where
+  // live positions wouldn't match the past view.
+  if (!history && flaggedMmsis.size > 0) {
     const flagged = data.filter((d) => flaggedMmsis.has(d.mmsi));
     if (flagged.length > 0) {
       const pulse = 0.5 + 0.5 * Math.sin(currentTime * 3);

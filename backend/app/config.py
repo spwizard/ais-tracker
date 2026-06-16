@@ -129,10 +129,11 @@ class Settings(BaseSettings):
 
     # --- Risk engine -------------------------------------------------------
     risk_eval_sec: float = Field(default=20.0, alias="RISK_EVAL_SEC")
-    risk_teleport_kn: float = Field(default=70.0, alias="RISK_TELEPORT_KN")
-    risk_rendezvous_slow_kn: float = Field(default=5.0, alias="RISK_RDV_SLOW_KN")
-    risk_rendezvous_nm: float = Field(default=0.5, alias="RISK_RDV_NM")
-    risk_rendezvous_min: float = Field(default=20.0, alias="RISK_RDV_MIN")
+    risk_teleport_kn: float = Field(default=80.0, alias="RISK_TELEPORT_KN")
+    risk_rendezvous_slow_kn: float = Field(default=4.0, alias="RISK_RDV_SLOW_KN")
+    risk_rendezvous_nm: float = Field(default=0.35, alias="RISK_RDV_NM")
+    # Sustained proximity required (min). Higher = fewer congestion false positives.
+    risk_rendezvous_min: float = Field(default=45.0, alias="RISK_RDV_MIN")
 
     # --- HTTP / CORS -------------------------------------------------------
     # Comma-separated list, a JSON array, or ``*``.

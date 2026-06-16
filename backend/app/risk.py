@@ -26,7 +26,17 @@ EARTH_R = 6_371_000.0
 M_PER_NM = 1852.0
 TELEPORT_MIN_JUMP_M = 5000.0  # ignore sub-5km jitter
 SPOOF_COOLDOWN_SEC = 600.0
+# A single outlier fix is a GPS glitch, not a spoof. We only fire once a flagged
+# jump is *confirmed* by the next fix staying near the jumped-to point (i.e. the
+# vessel didn't snap back to its track). This rate bounds "stayed near" travel.
+SPOOF_CONFIRM_KN = 60.0
 RENDEZVOUS_CELL_DEG = 0.05  # ~3–5 km spatial grid
+# A genuine STS is an *isolated* pair; an anchorage / port / lane has a crowd.
+# Skip pairs whose 3×3-cell neighbourhood holds more than this many candidates.
+RENDEZVOUS_MAX_LOCAL = 6
+# Don't re-fire the same pair within this window, even if they separate and
+# re-approach (kills repeat alerts from vessels loitering together).
+RENDEZVOUS_COOLDOWN_SEC = 43_200.0  # 12 h
 
 
 def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -49,9 +59,12 @@ class RiskEngine:
         # spoof state
         self._last_pos: dict[int, tuple[float, float, float]] = {}
         self._spoof_cooldown: dict[int, float] = {}
+        # unconfirmed jumps awaiting a corroborating next fix: mmsi -> (lat, lon, ts, detail)
+        self._spoof_pending: dict[int, tuple[float, float, float, dict]] = {}
         # rendezvous state
         self._pair_since: dict[tuple[int, int], float] = {}
         self._pair_fired: set[tuple[int, int]] = set()
+        self._pair_cooldown: dict[tuple[int, int], float] = {}  # pair -> last fired
         # recent behavioral events per mmsi (for the risk score)
         self._recent: dict[int, list[dict]] = {}
         # rolling fleet-wide event log (for the analyst's recent_events tool)
@@ -122,6 +135,34 @@ class RiskEngine:
             live.add(v.mmsi)
             prev = self._last_pos.get(v.mmsi)
             self._last_pos[v.mmsi] = (v.lat, v.lon, v.ts)
+
+            # A jump we flagged last round is now confirmed only if this fix
+            # stayed near the jumped-to point (a glitch snaps back to the track).
+            pending = self._spoof_pending.pop(v.mmsi, None)
+            if pending is not None:
+                blat, blon, bts, detail = pending
+                dt2 = v.ts - bts
+                back = _haversine_m(blat, blon, v.lat, v.lon)
+                plausible = dt2 > 0 and back <= max(
+                    TELEPORT_MIN_JUMP_M, SPOOF_CONFIRM_KN * M_PER_NM * (dt2 / 3600.0)
+                )
+                if plausible and now - self._spoof_cooldown.get(v.mmsi, 0.0) >= SPOOF_COOLDOWN_SEC:
+                    self._spoof_cooldown[v.mmsi] = now
+                    events.append(
+                        {
+                            "type": "risk_event",
+                            "kind": "spoof",
+                            "title": f"Impossible move — {detail['implied_kn']} kn jump",
+                            "mmsi": v.mmsi,
+                            "name": v.name,
+                            "lat": v.lat,
+                            "lon": v.lon,
+                            "ts": now,
+                            "detail": detail,
+                        }
+                    )
+                continue  # confirmed or discarded — don't open a new jump this round
+
             if prev is None:
                 continue
             plat, plon, pts = prev
@@ -134,29 +175,17 @@ class RiskEngine:
             kn = (dist / M_PER_NM) / (dt / 3600.0)
             if kn < threshold:
                 continue
-            if now - self._spoof_cooldown.get(v.mmsi, 0.0) < SPOOF_COOLDOWN_SEC:
-                continue
-            self._spoof_cooldown[v.mmsi] = now
-            events.append(
-                {
-                    "type": "risk_event",
-                    "kind": "spoof",
-                    "title": f"Impossible move — {kn:.0f} kn jump",
-                    "mmsi": v.mmsi,
-                    "name": v.name,
-                    "lat": v.lat,
-                    "lon": v.lon,
-                    "ts": now,
-                    "detail": {
-                        "implied_kn": round(kn),
-                        "jump_nm": round(dist / M_PER_NM, 1),
-                        "gap_sec": round(dt),
-                    },
-                }
+            # Flag, but wait for the next fix to confirm it isn't a one-off glitch.
+            self._spoof_pending[v.mmsi] = (
+                v.lat,
+                v.lon,
+                v.ts,
+                {"implied_kn": round(kn), "jump_nm": round(dist / M_PER_NM, 1), "gap_sec": round(dt)},
             )
         # prune vessels that have left
         self._last_pos = {k: v for k, v in self._last_pos.items() if k in live}
         self._spoof_cooldown = {k: v for k, v in self._spoof_cooldown.items() if k in live}
+        self._spoof_pending = {k: v for k, v in self._spoof_pending.items() if k in live}
 
     # --- rendezvous / STS ------------------------------------------------
     def _detect_rendezvous(self, snap, now, events) -> None:
@@ -185,6 +214,14 @@ class RiskEngine:
         current: set[tuple[int, int]] = set()
         for v in cand:
             cx, cy = int(v.lat / RENDEZVOUS_CELL_DEG), int(v.lon / RENDEZVOUS_CELL_DEG)
+            # Isolation gate: count candidates in the 3×3 neighbourhood. A real STS
+            # is an isolated pair; a crowd here means an anchorage / port / lane.
+            local = sum(
+                len(grid.get((cx + dx, cy + dy), ()))
+                for dx in (-1, 0, 1)
+                for dy in (-1, 0, 1)
+            )
+            crowded = local > RENDEZVOUS_MAX_LOCAL
             for dx in (-1, 0, 1):
                 for dy in (-1, 0, 1):
                     for u in grid.get((cx + dx, cy + dy), ()):
@@ -196,8 +233,14 @@ class RiskEngine:
                         pair = (v.mmsi, u.mmsi)
                         current.add(pair)
                         since = self._pair_since.setdefault(pair, now)
-                        if pair not in self._pair_fired and now - since >= sustain:
+                        if (
+                            not crowded
+                            and pair not in self._pair_fired
+                            and now - since >= sustain
+                            and now - self._pair_cooldown.get(pair, 0.0) >= RENDEZVOUS_COOLDOWN_SEC
+                        ):
                             self._pair_fired.add(pair)
+                            self._pair_cooldown[pair] = now
                             events.append(
                                 {
                                     "type": "risk_event",
@@ -216,8 +259,11 @@ class RiskEngine:
                                     },
                                 }
                             )
-        # forget pairs that have separated
+        # forget pairs that have separated (cooldown persists so they can't
+        # immediately re-fire on re-approach)
         for pair in list(self._pair_since):
             if pair not in current:
                 self._pair_since.pop(pair, None)
                 self._pair_fired.discard(pair)
+        cutoff = now - RENDEZVOUS_COOLDOWN_SEC
+        self._pair_cooldown = {p: t for p, t in self._pair_cooldown.items() if t >= cutoff}
