@@ -29,6 +29,17 @@ const MODEL_SIZE_SCALE = 110;
 const MODEL_MIN_PX = 24;
 const MODEL_MAX_PX = 72;
 
+/**
+ * The compass angle a vessel should face. While making way, face the direction
+ * of travel (course over ground) so the hull glides forward — matching the
+ * dead-reckoned motion — instead of crabbing along a heading that differs from
+ * the course. When stopped, fall back to the reported heading, then course.
+ */
+function facingAngle(d: TrackedVessel): number {
+  if ((d.sog ?? 0) > 0.5 && d.cog != null) return d.cog;
+  return d.heading ?? d.cog ?? 0;
+}
+
 // Cross-fade between the density heatmap (zoomed out) and vessel icons (zoomed
 // in). Icons are full above ICON_FULL; heatmap is full below HEAT_FULL.
 const ICON_FULL = 6.5;
@@ -508,7 +519,7 @@ export function buildLayers(opts: LayerOptions) {
           sizeMaxPixels: MODEL_MAX_PX,
           getPosition: (d) =>
             deadReckon(d.lat as number, d.lon as number, d.cog, d.sog, currentTime - d.ts),
-          getOrientation: (d) => [0, -((d.heading ?? d.cog ?? 0)) + model.yawOffset, 90],
+          getOrientation: (d) => [0, -facingAngle(d) + model.yawOffset, 90],
           onClick: (info) => onClick((info.object as TrackedVessel) ?? null),
           updateTriggers: {
             getPosition: currentTime,
