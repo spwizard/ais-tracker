@@ -53,5 +53,5 @@ class Geofence(BaseModel):
     def dark_sec(self) -> Optional[int]:
         for t in self.triggers:
             if t.on == "dark":
-                return t.darkSec or 600
+                return t.darkSec or 360
         return None

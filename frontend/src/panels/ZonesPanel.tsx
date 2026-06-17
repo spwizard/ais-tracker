@@ -199,7 +199,7 @@ const TRIGGERS: { kind: TriggerKind; label: string }[] = [
 const TRIGGER_DEFAULTS: Record<string, Partial<FenceTrigger>> = {
   dwell: { dwellSec: 600 },
   speed: { speedOp: "over", speedKn: 10 },
-  dark: { darkSec: 600 },
+  dark: { darkSec: 360 },
 };
 
 function TriggerConfig({
@@ -287,7 +287,7 @@ function TriggerConfig({
               <Input
                 type="number"
                 min={1}
-                value={Math.round((dark.darkSec ?? 600) / 60)}
+                value={Math.round((dark.darkSec ?? 360) / 60)}
                 onChange={(e) => patch("dark", { darkSec: Math.max(1, Number(e.target.value)) * 60 })}
                 className="h-7 w-16 text-xs"
               />

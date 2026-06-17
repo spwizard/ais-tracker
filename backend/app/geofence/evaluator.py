@@ -31,9 +31,31 @@ def _substantial(ship_type) -> bool:
     return ship_type is not None and 40 <= ship_type <= 89
 
 
-# A few minutes of AIS silence is routine, not "gone dark". Floor the dark window
-# so a short per-fence setting can't fire on brief gaps.
-DARK_MIN_SEC = 600  # 10 min
+# "Dark" window bounds. The floor ignores brief AIS gaps; the ceiling keeps it
+# below the store's eviction TTL (VESSEL_TTL_SEC = 600 s) so the vessel is still
+# tracked when it fires — a vessel silent longer than the TTL is simply dropped,
+# which isn't the same as going dark inside a watched zone.
+DARK_MIN_SEC = 300  # 5 min — below this is just a routine gap
+DARK_MAX_SEC = 420  # 7 min — must stay under VESSEL_TTL_SEC
+
+# Dwell floor — only genuinely long loitering, not a routine terminal call.
+DWELL_MIN_SEC = 1800  # 30 min
+
+# Coverage-aware dark gate. A vessel only counts as "gone dark" if other vessels
+# nearby are still transmitting — proving reception works, so the silence is the
+# vessel's choice, not a local signal gap. This is the discriminator between an
+# intentional AIS shut-off and routine coverage loss.
+COVERAGE_RADIUS_M = 5 * 1852.0  # 5 nm
+COVERAGE_FRESH_SEC = 300  # a neighbour heard within 5 min = live reception
+COVERAGE_MIN_NEIGHBORS = 3
+
+
+def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lon2 - lon1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * EARTH_R * math.asin(math.sqrt(a))
 
 
 def _forward(lon: float, lat: float, bearing: float, dist_m: float) -> tuple[float, float]:
@@ -160,10 +182,11 @@ class GeofenceEvaluator:
                     continue
                 key = (v.mmsi, fid)
 
-                # Dwell: a substantial vessel still inside after the threshold.
+                # Dwell: a substantial vessel still inside after the threshold —
+                # floored so a routine terminal call doesn't fire, only loitering.
                 dwell = f.dwell_sec()
                 if dwell and _substantial(v.ship_type) and key not in self._dwell_fired:
-                    if now - self._entered_at.get(key, now) >= dwell:
+                    if now - self._entered_at.get(key, now) >= max(dwell, DWELL_MIN_SEC):
                         self._dwell_fired.add(key)
                         if emit:
                             events.append(self._event("dwell", f, v, now))
@@ -187,13 +210,16 @@ class GeofenceEvaluator:
                 # "go dark" on our watch until darkSec passes).
                 dark = f.dark_sec()
                 if dark is not None and _substantial(v.ship_type):
-                    dark = max(dark, DARK_MIN_SEC)
+                    dark = min(max(dark, DARK_MIN_SEC), DARK_MAX_SEC)
                     watch_start = self._entered_at.get(key, now)
                     silent = now - max(v.ts, watch_start) >= dark
                     if silent and key not in self._dark_fired:
-                        self._dark_fired.add(key)
-                        if emit:
-                            events.append(self._event("dark", f, v, now))
+                        # Only a deliberate shut-off if reception is live nearby.
+                        if self._has_live_coverage(snapshot, v, now):
+                            self._dark_fired.add(key)
+                            if emit:
+                                events.append(self._event("dark", f, v, now))
+                        # else: a local reception gap, not a vessel going dark
                     elif not silent:
                         self._dark_fired.discard(key)
 
@@ -214,6 +240,30 @@ class GeofenceEvaluator:
             await self._broadcaster.send_frame(ev)
         if events:
             log.info("emitted %d geofence events", len(events))
+
+    def _has_live_coverage(self, snapshot, v, now: float) -> bool:
+        """True if vessels near v are still transmitting, proving reception works
+        — so v's silence is a deliberate shut-off, not a local reception gap.
+        Only runs when a vessel actually crosses the dark threshold (rare), and
+        a cheap lat/lon pre-filter avoids the haversine for distant vessels."""
+        fresh = now - COVERAGE_FRESH_SEC
+        dlat, dlon = 0.1, 0.15  # ~6 nm box; lon padded for the cos(lat) factor
+        n = 0
+        for u in snapshot:
+            if (
+                u.mmsi == v.mmsi
+                or u.lon is None
+                or u.lat is None
+                or u.ts < fresh
+                or abs(u.lat - v.lat) > dlat
+                or abs(u.lon - v.lon) > dlon
+            ):
+                continue
+            if _haversine_m(v.lat, v.lon, u.lat, u.lon) <= COVERAGE_RADIUS_M:
+                n += 1
+                if n >= COVERAGE_MIN_NEIGHBORS:
+                    return True
+        return False
 
     def _event(self, kind: str, f: Geofence, v, now: float) -> dict:
         return {
