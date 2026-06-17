@@ -13,6 +13,7 @@ DEFAULTS: dict[str, bool] = {
     "risk_engine": True,    # behavioral detectors (rendezvous / spoof)
     "llm_briefing": True,   # Claude-generated risk briefing
     "density_timeline": True,  # historical traffic-density timeline
+    "replay": False,        # scrubbable historical vessel-movement replay
     "weather": True,        # GFS wind particle overlay
     "analyst": True,        # conversational AI analyst over the live picture
 }

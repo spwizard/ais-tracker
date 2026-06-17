@@ -1,8 +1,10 @@
 import {
   forwardRef,
+  useCallback,
   useEffect,
   useImperativeHandle,
   useMemo,
+  useRef,
   useState,
   type Ref,
 } from "react";
@@ -13,9 +15,10 @@ import {
   WebMercatorViewport,
 } from "@deck.gl/core";
 import { Map } from "react-map-gl/maplibre";
-import type { TrackedVessel, DensityPoint, WeatherMeta } from "@/types";
+import type { TrackedVessel, DensityPoint, WeatherMeta, ReplayTrack, Alert } from "@/types";
 import { NAV_STATUS, colorHexFor } from "@/lib/shipTypes";
 import { buildLayers } from "./layers";
+import { buildReplayLayers, type TrailMode, type ColorMode } from "./replayLayers";
 import { buildFenceLayers, buildDraftLayers } from "./geofenceLayers";
 import { useGeofenceDraw, type DrawResult } from "@/hooks/useGeofenceDraw";
 import type { CompiledFence } from "@/geofence/geometry";
@@ -42,6 +45,10 @@ export interface MapHandle {
   fitBounds: (points: [number, number][]) => void;
   set3D: (on: boolean) => void;
   pitchBy: (delta: number) => void;
+  /** Jump the replay clock to an absolute time (epoch seconds). */
+  seek: (t: number) => void;
+  /** Current map viewport bounds as [west, south, east, north]. */
+  getBounds: () => [number, number, number, number] | null;
 }
 
 interface MapViewProps {
@@ -52,6 +59,18 @@ interface MapViewProps {
   densityMode: boolean;
   selectedMmsi: number | null;
   onSelect: (v: TrackedVessel | null) => void;
+  // --- Replay mode (historical movement scrubbing) ---
+  replayMode: boolean;
+  replayTracks: ReplayTrack[];
+  replayAlerts: Alert[];
+  replayRange: { start: number; end: number } | null;
+  replayPlaying: boolean;
+  replaySpeed: number;
+  replayTrailMode: TrailMode;
+  replayColorMode: ColorMode;
+  replayMovingOnly: boolean;
+  onReplayTime: (t: number) => void;
+  onReplaySelect: (mmsi: number | null) => void;
   theme: "light" | "dark";
   highlightTrack: [number, number, number][] | null;
   highlightColor: [number, number, number];
@@ -95,6 +114,17 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
     densityMode,
     selectedMmsi,
     onSelect,
+    replayMode,
+    replayTracks,
+    replayAlerts,
+    replayRange,
+    replayPlaying,
+    replaySpeed,
+    replayTrailMode,
+    replayColorMode,
+    replayMovingOnly,
+    onReplayTime,
+    onReplaySelect,
     theme,
     highlightTrack,
     highlightColor,
@@ -130,18 +160,67 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
     INITIAL_VIEW,
   );
 
-  // Animation clock: drives both vessel dead-reckoning and the trail fade.
-  // Kept local to the map so 60fps ticks re-render only the map, not the app.
+  // Animation clock: drives vessel dead-reckoning + trail fade in live mode, and
+  // the scrub position in replay mode. Kept local to the map so 60fps ticks
+  // re-render only the map, not the app — the only thing that escapes upward is
+  // a throttled `onReplayTime` for the timeline readout.
   const [currentTime, setCurrentTime] = useState(() => Date.now() / 1000);
+  const timeRef = useRef(currentTime);
+  const setTime = useCallback((t: number) => {
+    timeRef.current = t;
+    setCurrentTime(t);
+  }, []);
+
+  // Live clock — wall-clock, paused while replaying.
   useEffect(() => {
+    if (replayMode) return;
     let raf = 0;
     const tick = () => {
-      if (!document.hidden) setCurrentTime(Date.now() / 1000);
+      if (!document.hidden) setTime(Date.now() / 1000);
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, []);
+  }, [replayMode, setTime]);
+
+  // Replay clock — advances within [start, end] at replaySpeed, looping at the
+  // end. Play/pause/speed are read from refs so toggling them doesn't restart
+  // the rAF (which would jolt the elapsed-time delta).
+  const playingRef = useRef(replayPlaying);
+  playingRef.current = replayPlaying;
+  const speedRef = useRef(replaySpeed);
+  speedRef.current = replaySpeed;
+  const onReplayTimeRef = useRef(onReplayTime);
+  onReplayTimeRef.current = onReplayTime;
+
+  // Reset to the window start whenever the replay window (re)loads.
+  useEffect(() => {
+    if (replayMode && replayRange) setTime(replayRange.start);
+  }, [replayMode, replayRange, setTime]);
+
+  useEffect(() => {
+    if (!replayMode || !replayRange) return;
+    const { start, end } = replayRange;
+    let raf = 0;
+    let last = performance.now();
+    let lastReport = 0;
+    const tick = (now: number) => {
+      const dt = (now - last) / 1000;
+      last = now;
+      if (playingRef.current && !document.hidden) {
+        let next = timeRef.current + dt * speedRef.current;
+        if (next >= end || next < start) next = start; // loop
+        setTime(next);
+      }
+      if (now - lastReport > 250) {
+        lastReport = now;
+        onReplayTimeRef.current(timeRef.current);
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [replayMode, replayRange, setTime]);
 
   useImperativeHandle(ref, () => ({
     flyTo: (t) =>
@@ -179,6 +258,28 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
         transitionDuration: 250,
         transitionInterpolator: new LinearInterpolator(["pitch"]),
       })),
+    seek: (t) => {
+      const clamped = replayRange
+        ? Math.min(replayRange.end, Math.max(replayRange.start, t))
+        : t;
+      setTime(clamped);
+      onReplayTime(clamped);
+    },
+    getBounds: () => {
+      const vp = new WebMercatorViewport({
+        ...(viewState as Record<string, number>),
+        width: window.innerWidth || 1280,
+        height: window.innerHeight || 800,
+      });
+      const [x0, y0] = vp.unproject([0, 0]);
+      const [x1, y1] = vp.unproject([vp.width, vp.height]);
+      return [
+        Math.min(x0, x1),
+        Math.min(y0, y1),
+        Math.max(x0, x1),
+        Math.max(y0, y1),
+      ];
+    },
     fit: () =>
       setViewState((prev) => ({
         ...prev,
@@ -226,7 +327,21 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
   }));
 
   const layers = useMemo(
-    () => [
+    () =>
+      replayMode
+        ? buildReplayLayers({
+            tracks: replayTracks,
+            alerts: replayAlerts,
+            currentTime,
+            zoom: (viewState.zoom as number) ?? 7,
+            trailMode: replayTrailMode,
+            colorMode: replayColorMode,
+            movingOnly: replayMovingOnly,
+            windowSec: replayRange ? replayRange.end - replayRange.start : 3600,
+            selectedMmsi,
+            onClick: onReplaySelect,
+          })
+        : [
       // Fences render beneath vessels; the draft preview sits on top.
       ...buildFenceLayers(
         compiledFences,
@@ -267,6 +382,14 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
     ],
     // currentTime drives trail animation + motion; version drives data refresh.
     [
+      replayMode,
+      replayTracks,
+      replayAlerts,
+      replayTrailMode,
+      replayColorMode,
+      replayMovingOnly,
+      replayRange,
+      onReplaySelect,
       vessels,
       version,
       viewState,
@@ -324,7 +447,11 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
         drawing ? "crosshair" : isHovering ? "pointer" : isDragging ? "grabbing" : "grab"
       }
       getTooltip={({ object }) =>
-        drawing ? null : buildTooltip(object as TrackedVessel | null)
+        drawing
+          ? null
+          : object && (object as Alert).category
+            ? buildAlertTooltip(object as Alert)
+            : buildTooltip(object as TrackedVessel | null)
       }
       onClick={(info) => {
         if (drawing) {
@@ -362,6 +489,24 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
         maxPitch={79}
       />
       </DeckGL>
+      {/* Cinematic dimming in replay: knock the basemap + labels back and add a
+          vignette so the neon routes read as the foreground. Only the MapLibre
+          canvas is filtered — deck's data canvas stays at full brightness. */}
+      {replayMode && (
+        <>
+          <style>{".maplibregl-map{filter:brightness(0.58) saturate(0.85) contrast(1.05)}"}</style>
+          <div
+            aria-hidden
+            style={{
+              position: "absolute",
+              inset: 0,
+              pointerEvents: "none",
+              background:
+                "radial-gradient(ellipse at center, rgba(2,6,16,0) 42%, rgba(2,6,16,0.5) 100%)",
+            }}
+          />
+        </>
+      )}
       {skyOpacity > 0 && (
         <div
           aria-hidden
@@ -395,6 +540,40 @@ function buildTooltip(v: TrackedVessel | null) {
         <div style="opacity:.7;font-size:11px;line-height:1.5">
           Speed ${speed} · Course ${v.cog != null ? Math.round(v.cog) + "°" : "—"}<br/>
           ${escapeHtml(status)}
+        </div>
+      </div>`,
+    style: tooltipStyle(),
+  };
+}
+
+const ALERT_VERB: Record<string, string> = {
+  rendezvous: "Rendezvous",
+  spoof: "Position jump / spoof",
+  enter: "Zone entry",
+  exit: "Zone exit",
+  dwell: "Loitering",
+  speed: "Speeding",
+  dark: "Went dark",
+};
+
+function buildAlertTooltip(a: Alert) {
+  const title = a.title ?? ALERT_VERB[a.kind] ?? a.kind;
+  const who = a.name ?? (a.mmsi != null ? `MMSI ${a.mmsi}` : "Unknown vessel");
+  const when = new Date(a.ts * 1000).toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  return {
+    html: `
+      <div style="font-family:Inter,system-ui,sans-serif;min-width:170px">
+        <div style="display:flex;align-items:center;gap:6px;font-weight:600;margin-bottom:4px">
+          <span style="width:8px;height:8px;border-radius:9999px;background:#facc15"></span>
+          ${escapeHtml(title)}
+        </div>
+        <div style="opacity:.7;font-size:11px;line-height:1.5">
+          ${escapeHtml(who)}<br/>${escapeHtml(when)}
         </div>
       </div>`,
     style: tooltipStyle(),

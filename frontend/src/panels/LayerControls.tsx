@@ -1,4 +1,4 @@
-import { Layers, Route, Navigation, Flame, Wind, Waves } from "lucide-react";
+import { Layers, Route, Navigation, Flame, Wind, Waves, History } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -17,6 +17,9 @@ interface LayerControlsProps {
   showWaves: boolean;
   onToggleWaves: (v: boolean) => void;
   wavesAvailable: boolean;
+  replayMode: boolean;
+  onToggleReplay: (v: boolean) => void;
+  replayAvailable: boolean;
   onJump: (target: ViewTarget) => void;
 }
 
@@ -44,6 +47,9 @@ export function LayerControls({
   showWaves,
   onToggleWaves,
   wavesAvailable,
+  replayMode,
+  onToggleReplay,
+  replayAvailable,
   onJump,
 }: LayerControlsProps) {
   return (
@@ -86,6 +92,22 @@ export function LayerControls({
             </span>
             <Switch checked={showWaves} onCheckedChange={onToggleWaves} />
           </label>
+        )}
+
+        {replayAvailable && (
+          <>
+            <Separator />
+            <label className="flex cursor-pointer items-center justify-between rounded-md px-1 py-1">
+              <span className="flex items-center gap-2 text-sm">
+                <History className="h-4 w-4 text-muted-foreground" />
+                Movement replay
+              </span>
+              <Switch checked={replayMode} onCheckedChange={onToggleReplay} />
+            </label>
+            <p className="px-1 text-[10px] leading-snug text-muted-foreground/60">
+              Scrub recent vessel tracks in view through time. Pauses the live feed.
+            </p>
+          </>
         )}
 
         <Separator />

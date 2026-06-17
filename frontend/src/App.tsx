@@ -16,6 +16,7 @@ import { DrawToolbar } from "@/panels/DrawToolbar";
 import { AlertToasts, type ToastAlert } from "@/panels/AlertToasts";
 import { OwnershipGraph } from "@/panels/OwnershipGraph";
 import { DensityTimeline } from "@/panels/DensityTimeline";
+import { ReplayTimeline } from "@/panels/ReplayTimeline";
 import { ForecastTimeline } from "@/panels/ForecastTimeline";
 import { MapLegend } from "@/panels/MapLegend";
 import { AnalystPanel } from "@/panels/AnalystPanel";
@@ -23,6 +24,9 @@ import { useAnalyst, type MapDirective } from "@/hooks/useAnalyst";
 import { DataSheet, type DataTab } from "@/panels/DataSheet";
 import type { Alert } from "@/types";
 import { useDensity } from "@/hooks/useDensity";
+import { useReplay, type ReplayWindow } from "@/hooks/useReplay";
+import { useReplayAlerts } from "@/hooks/useReplayAlerts";
+import type { TrailMode, ColorMode } from "@/map/replayLayers";
 import { useWeather, useWaves } from "@/hooks/useWeather";
 import { useFlag } from "@/hooks/useFlags";
 import type { DensityPoint } from "@/types";
@@ -92,6 +96,51 @@ export default function App() {
   useEffect(() => {
     if (!densityMode) setDensityOverride(null);
   }, [densityMode]);
+
+  // --- vessel-movement replay -------------------------------------------
+  const replayAvailable = useFlag("replay");
+  const [replayMode, setReplayMode] = useState(false);
+  const [replayPlaying, setReplayPlaying] = useState(true);
+  const [replaySpeed, setReplaySpeed] = useState(60);
+  const [replayWindow, setReplayWindow] = useState<ReplayWindow | null>(null);
+  // Scrub time reported back from the map clock (~4Hz) — drives the readout only.
+  const [replayTime, setReplayTime] = useState(0);
+  const [replaySelectedMmsi, setReplaySelectedMmsi] = useState<number | null>(null);
+  const [replayTrailMode, setReplayTrailMode] = useState<TrailMode>("full");
+  const [replayColorMode, setReplayColorMode] = useState<ColorMode>("speed");
+  const [replayMovingOnly, setReplayMovingOnly] = useState(false);
+  const REPLAY_WINDOW_SEC = 24 * 3600;
+
+  const replay = useReplay(replayMode ? replayWindow : null);
+  const replayAlerts = useReplayAlerts(replayMode ? replayWindow : null);
+
+  // Clamp the scrub range to what the server actually has, so the slider can't
+  // run past the data. Falls back to the requested window when the store is empty.
+  const replayRange = useMemo(() => {
+    if (!replayWindow) return null;
+    let { start, end } = replayWindow;
+    if (replay.span) {
+      start = Math.max(start, replay.span[0]);
+      end = Math.min(end, replay.span[1]);
+    }
+    return end > start ? { start, end } : { start: replayWindow.start, end: replayWindow.end };
+  }, [replayWindow, replay.span]);
+
+  const toggleReplay = useCallback((on: boolean) => {
+    if (on) {
+      const bounds = mapRef.current?.getBounds() ?? undefined;
+      const end = Date.now() / 1000;
+      setReplayWindow({ start: end - REPLAY_WINDOW_SEC, end, bbox: bounds });
+      setReplayTime(end - REPLAY_WINDOW_SEC);
+      setReplaySelectedMmsi(null);
+      setReplayPlaying(true);
+      setDensityMode(false); // mutually exclusive with the density timeline
+      setReplayMode(true);
+    } else {
+      setReplayMode(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [REPLAY_WINDOW_SEC]);
   const [showSelectedTrack, setShowSelectedTrack] = useState(false);
   const mapRef = useRef<MapHandle>(null);
 
@@ -358,8 +407,19 @@ export default function App() {
         showTrails={showTrails}
         trailWindowSec={TRAIL_WINDOW_SEC}
         densityMode={densityMode}
-        selectedMmsi={selectedMmsi}
+        selectedMmsi={replayMode ? replaySelectedMmsi : selectedMmsi}
         onSelect={selectVessel}
+        replayMode={replayMode}
+        replayTracks={replay.tracks}
+        replayAlerts={replayAlerts}
+        replayRange={replayRange}
+        replayPlaying={replayPlaying}
+        replaySpeed={replaySpeed}
+        replayTrailMode={replayTrailMode}
+        replayColorMode={replayColorMode}
+        replayMovingOnly={replayMovingOnly}
+        onReplayTime={setReplayTime}
+        onReplaySelect={setReplaySelectedMmsi}
         theme={theme}
         highlightTrack={
           showSelectedTrack && selectedVisible && selectedTrack.length >= 2
@@ -450,6 +510,9 @@ export default function App() {
             showWaves={showWaves}
             onToggleWaves={setShowWaves}
             wavesAvailable={waves.available}
+            replayMode={replayMode}
+            onToggleReplay={toggleReplay}
+            replayAvailable={replayAvailable}
             onJump={handleJump}
           />
         )}
@@ -528,12 +591,35 @@ export default function App() {
           <DensityTimeline buckets={buckets} onSelect={onTimelineSelect} />
         )}
 
+        {replayMode && replayRange && (
+          <ReplayTimeline
+            range={replayRange}
+            currentTime={replayTime}
+            playing={replayPlaying}
+            onTogglePlaying={() => setReplayPlaying((p) => !p)}
+            speed={replaySpeed}
+            onSpeed={setReplaySpeed}
+            trailMode={replayTrailMode}
+            onTrailMode={setReplayTrailMode}
+            colorMode={replayColorMode}
+            onColorMode={setReplayColorMode}
+            movingOnly={replayMovingOnly}
+            onMovingOnly={setReplayMovingOnly}
+            onSeek={(t) => mapRef.current?.seek(t)}
+            onExit={() => toggleReplay(false)}
+            loading={replay.loading}
+            trackCount={replay.tracks.length}
+          />
+        )}
+
         <MapLegend
           showWind={showWind}
           windAvailable={weather.available}
           showWaves={showWaves}
           wavesAvailable={waves.available}
           densityMode={densityMode}
+          replayMode={replayMode}
+          replayColorMode={replayColorMode}
           flaggedCount={flagged.size}
           hasSelection={selectedMmsi != null}
         />

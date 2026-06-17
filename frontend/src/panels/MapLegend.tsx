@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { SHIP_TYPE_GROUPS } from "@/lib/shipTypes";
 import { WIND_SPEED_PALETTE, WAVE_HEIGHT_PALETTE, HEAT_COLOR_RANGE } from "@/map/layers";
+import { SPEED_RAMP, SPEED_MAX_KN, type ColorMode } from "@/map/replayLayers";
 
 const MS_TO_KN = 1.94384;
 
@@ -18,6 +19,11 @@ const WAVE_GRADIENT = WAVE_HEIGHT_PALETTE.map(
 const HEAT_GRADIENT = HEAT_COLOR_RANGE.map(
   ([r, g, b], i) =>
     `rgb(${r},${g},${b}) ${Math.round((i / (HEAT_COLOR_RANGE.length - 1)) * 100)}%`,
+).join(", ");
+// Speed ramp keyed by actual knots so the gradient stops sit where the colours
+// truly change (the ramp is non-linear), matching the replay lines exactly.
+const SPEED_GRADIENT = SPEED_RAMP.map(
+  ([kn, [r, g, b]]) => `rgb(${r},${g},${b}) ${Math.round((kn / SPEED_MAX_KN) * 100)}%`,
 ).join(", ");
 
 function Section({ label, children }: { label: string; children: ReactNode }) {
@@ -57,6 +63,8 @@ export function MapLegend({
   showWaves,
   wavesAvailable,
   densityMode,
+  replayMode,
+  replayColorMode,
   flaggedCount,
   hasSelection,
 }: {
@@ -65,6 +73,8 @@ export function MapLegend({
   showWaves: boolean;
   wavesAvailable: boolean;
   densityMode: boolean;
+  replayMode: boolean;
+  replayColorMode: ColorMode;
   flaggedCount: number;
   hasSelection: boolean;
 }) {
@@ -99,8 +109,51 @@ export function MapLegend({
     );
   }
 
+  // Replay colours lines + heads by speed, so show the speed key instead of type.
+  if (replayMode) {
+    const label =
+      replayColorMode === "speed"
+        ? "Vessel speed"
+        : replayColorMode === "type"
+          ? "Vessel type"
+          : "Routes";
+    sections.push(
+      <Section key="replay" label={label}>
+        {replayColorMode === "speed" && (
+          <Ramp
+            gradient={SPEED_GRADIENT}
+            ticks={["stopped", "~9", "~17", `${SPEED_MAX_KN}+ kn`]}
+          />
+        )}
+        {replayColorMode === "type" && (
+          <div className="grid grid-cols-2 gap-x-2 gap-y-1">
+            {SHIP_TYPE_GROUPS.map((g) => (
+              <span key={g.key} className="flex items-center gap-1.5">
+                <span
+                  className="h-2.5 w-2.5 shrink-0 rounded-full"
+                  style={{ background: g.color }}
+                />
+                <span className="truncate text-[11px] text-foreground/90">{g.label}</span>
+              </span>
+            ))}
+          </div>
+        )}
+        {replayColorMode === "mono" && (
+          <span className="flex items-center gap-1.5">
+            <span className="h-0.5 w-5 shrink-0 rounded-full bg-[#d2e1ff]" />
+            <span className="text-[11px] text-foreground/90">Vessel route</span>
+          </span>
+        )}
+        <span className="mt-1.5 flex items-center gap-1.5">
+          <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#facc15] ring-2 ring-[#facc15]/40" />
+          <span className="text-[11px] text-foreground/90">Alert event</span>
+        </span>
+      </Section>,
+    );
+  }
+
   // Vessel icons are visible whenever we're not in the (icon-hiding) density view.
-  if (!densityMode) {
+  if (!densityMode && !replayMode) {
     sections.push(
       <Section key="vessels" label="Vessel type">
         <div className="grid grid-cols-2 gap-x-2 gap-y-1">

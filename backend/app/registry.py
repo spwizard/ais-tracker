@@ -89,6 +89,11 @@ class VesselRegistry:
             if getattr(update, f) is None and f in rec:
                 setattr(update, f, rec[f])
 
+    def name(self, mmsi: int) -> str | None:
+        """Known vessel name for an MMSI, or None if never seen."""
+        rec = self._mem.get(mmsi)
+        return rec.get("name") if rec else None
+
     def flush(self) -> int:
         """Persist dirty records to SQLite. Cheap (executemany in WAL)."""
         if not self._dirty or self._conn is None:

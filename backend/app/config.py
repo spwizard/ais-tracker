@@ -102,6 +102,11 @@ class Settings(BaseSettings):
     density_bucket_sec: int = Field(default=3600, alias="DENSITY_BUCKET_SEC")  # 1h buckets
     density_sample_sec: float = Field(default=60.0, alias="DENSITY_SAMPLE_SEC")
 
+    # --- Vessel-movement replay (historical position track store) ----------
+    history_path: str = Field(default="data/positions.sqlite", alias="HISTORY_PATH")
+    history_window_sec: int = Field(default=172800, alias="HISTORY_WINDOW_SEC")  # 48h
+    history_sample_sec: float = Field(default=30.0, alias="HISTORY_SAMPLE_SEC")
+
     # --- Weather (GFS wind field) ------------------------------------------
     weather_enabled: bool = Field(default=True, alias="WEATHER_ENABLED")
     weather_dir: str = Field(default="data/weather", alias="WEATHER_DIR")

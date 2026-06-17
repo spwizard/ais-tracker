@@ -38,6 +38,7 @@ from .ownership import OwnershipStore
 from .registry import VesselRegistry
 from .briefing import BriefingService, BriefingUnavailable
 from .density import DensityRecorder
+from .history import TrackHistory
 from .risk import RiskEngine
 from .risk_score import compute_risk
 from .sanctions import SanctionsStore
@@ -104,6 +105,18 @@ async def _density_loop(app: FastAPI) -> None:
             await asyncio.to_thread(app.state.density.sample, snap)
         except Exception as exc:  # noqa: BLE001
             log.warning("density sample failed: %s", exc)
+
+
+async def _history_loop(app: FastAPI) -> None:
+    """Periodically append the live fleet to the position-history store."""
+    interval = app.state.settings.history_sample_sec
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            snap = await app.state.store.snapshot()
+            await asyncio.to_thread(app.state.history.sample, snap)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("history sample failed: %s", exc)
 
 
 async def _risk_loop(app: FastAPI) -> None:
@@ -215,6 +228,11 @@ async def lifespan(app: FastAPI):
     density.open()
     app.state.density = density
 
+    # Historical vessel-position store (powers the replay/scrubbing timeline).
+    history = TrackHistory(settings.history_path, settings.history_window_sec)
+    history.open()
+    app.state.history = history
+
     # Persistent alert history (risk + geofence events), fed from the broadcaster.
     alerts = AlertStore(settings.alerts_path)
     alerts.open()
@@ -256,6 +274,7 @@ async def lifespan(app: FastAPI):
     geofence_task = asyncio.create_task(_geofence_loop(app), name="geofence-eval")
     risk_task = asyncio.create_task(_risk_loop(app), name="risk-eval")
     density_task = asyncio.create_task(_density_loop(app), name="density-sample")
+    history_task = asyncio.create_task(_history_loop(app), name="history-sample")
     weather_task = (
         asyncio.create_task(_weather_loop(app), name="weather-refresh")
         if app.state.weather is not None
@@ -280,6 +299,7 @@ async def lifespan(app: FastAPI):
         geofence_task.cancel()
         risk_task.cancel()
         density_task.cancel()
+        history_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await sweeper
         with contextlib.suppress(asyncio.CancelledError):
@@ -288,11 +308,14 @@ async def lifespan(app: FastAPI):
             await risk_task
         with contextlib.suppress(asyncio.CancelledError):
             await density_task
+        with contextlib.suppress(asyncio.CancelledError):
+            await history_task
         if weather_task is not None:
             weather_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await weather_task
         density.close()
+        history.close()
         alerts.close()
         if registry_task is not None:
             registry_task.cancel()
@@ -394,6 +417,43 @@ async def density_buckets():
 async def density_bucket(bucket: int):
     """Density cells (lat/lon/count) for one bucket."""
     return {"points": app.state.density.points(bucket)}
+
+
+@app.get("/api/replay")
+async def replay(
+    start: float, end: float, bbox: str | None = None
+) -> dict:
+    """Per-vessel position tracks within ``[start, end]`` for movement replay.
+
+    ``bbox`` is an optional ``"west,south,east,north"`` filter. Returns the stored
+    span so the frontend can clamp its scrubber to what actually exists. Names are
+    joined from the registry (static, so kept out of the per-row history)."""
+    if not get_flags().get("replay"):
+        return {"tracks": [], "span": None}
+    box = None
+    if bbox:
+        try:
+            w, s, e, n = (float(x) for x in bbox.split(","))
+            box = (w, s, e, n)
+        except ValueError:
+            raise HTTPException(400, "bbox must be 'west,south,east,north'")
+
+    tracks = await asyncio.to_thread(
+        app.state.history.tracks, int(start), int(end), box
+    )
+    registry = app.state.registry
+    if registry is not None:
+        for t in tracks:
+            v = await app.state.store.get(t["mmsi"])
+            t["name"] = (v.name if v else None) or registry.name(t["mmsi"])
+
+    points = sum(len(t["path"]) for t in tracks)
+    log.info(
+        "replay: %d tracks, %d points, %ds window%s",
+        len(tracks), points, int(end - start), " (bbox)" if box else "",
+    )
+    span = await asyncio.to_thread(app.state.history.span)
+    return {"tracks": tracks, "span": span}
 
 
 async def _conditions_for(v) -> dict | None:

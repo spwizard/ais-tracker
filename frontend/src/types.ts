@@ -48,6 +48,15 @@ export interface TrackedVessel extends Vessel {
   trail: [number, number, number][];
 }
 
+/** One vessel's historical track for movement replay (GET /api/replay).
+ *  Each path point is [lon, lat, epochSeconds, sog, cog, heading]. */
+export interface ReplayTrack {
+  mmsi: number;
+  name: string | null;
+  ship_type: number | null;
+  path: [number, number, number, number | null, number | null, number | null][];
+}
+
 /** A geofence enter/exit/dwell event from the backend evaluator. */
 export interface GeofenceEvent {
   type: "geofence_event";
