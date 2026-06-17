@@ -31,9 +31,11 @@ SPOOF_COOLDOWN_SEC = 600.0
 # vessel didn't snap back to its track). This rate bounds "stayed near" travel.
 SPOOF_CONFIRM_KN = 60.0
 RENDEZVOUS_CELL_DEG = 0.05  # ~3–5 km spatial grid
-# A genuine STS is an *isolated* pair; an anchorage / port / lane has a crowd.
-# Skip pairs whose 3×3-cell neighbourhood holds more than this many candidates.
-RENDEZVOUS_MAX_LOCAL = 6
+# A genuine covert STS is an isolated pair in near-empty open water; a port /
+# harbour / anchorage / lane is packed with traffic of every kind. Skip pairs
+# whose 3×3-cell neighbourhood holds more than this many vessels of ANY type
+# (counting only cargo/tankers misses ports busy with ferries/tugs/small craft).
+RENDEZVOUS_MAX_NEARBY = 15
 # Don't re-fire the same pair within this window, even if they separate and
 # re-approach (kills repeat alerts from vessels loitering together).
 RENDEZVOUS_COOLDOWN_SEC = 43_200.0  # 12 h
@@ -211,17 +213,26 @@ class RiskEngine:
                 (int(v.lat / RENDEZVOUS_CELL_DEG), int(v.lon / RENDEZVOUS_CELL_DEG)), []
             ).append(v)
 
+        # Density of ALL vessels (any type) per cell — drives the isolation gate.
+        density: dict[tuple[int, int], int] = {}
+        for v in snap:
+            if v.lat is None or v.lon is None:
+                continue
+            cell = (int(v.lat / RENDEZVOUS_CELL_DEG), int(v.lon / RENDEZVOUS_CELL_DEG))
+            density[cell] = density.get(cell, 0) + 1
+
         current: set[tuple[int, int]] = set()
         for v in cand:
             cx, cy = int(v.lat / RENDEZVOUS_CELL_DEG), int(v.lon / RENDEZVOUS_CELL_DEG)
-            # Isolation gate: count candidates in the 3×3 neighbourhood. A real STS
-            # is an isolated pair; a crowd here means an anchorage / port / lane.
-            local = sum(
-                len(grid.get((cx + dx, cy + dy), ()))
+            # Isolation gate: count *all* traffic in the 3×3 neighbourhood. A real
+            # covert STS is an isolated pair in open water; a crowd of any vessel
+            # types means a port / harbour / anchorage / lane.
+            nearby = sum(
+                density.get((cx + dx, cy + dy), 0)
                 for dx in (-1, 0, 1)
                 for dy in (-1, 0, 1)
             )
-            crowded = local > RENDEZVOUS_MAX_LOCAL
+            crowded = nearby > RENDEZVOUS_MAX_NEARBY
             for dx in (-1, 0, 1):
                 for dy in (-1, 0, 1):
                     for u in grid.get((cx + dx, cy + dy), ()):
