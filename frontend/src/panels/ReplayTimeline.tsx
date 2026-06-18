@@ -2,7 +2,7 @@ import { Play, Pause, Radio, History, Ship } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { TrailMode, ColorMode } from "@/map/replayLayers";
 
-const SPEEDS = [1, 10, 60, 300];
+const SPEEDS = [1, 10, 100, 1000];
 const COLOR_MODES: { key: ColorMode; label: string }[] = [
   { key: "speed", label: "Spd" },
   { key: "type", label: "Type" },
@@ -19,7 +19,7 @@ function fmtClock(ts: number): string {
 }
 
 function fmtSpeed(s: number): string {
-  return s >= 60 ? `${s / 60}m/s` : `${s}×`;
+  return `${s}×`;
 }
 
 /** Scrubber for vessel-movement replay. Drives the map's replay clock via

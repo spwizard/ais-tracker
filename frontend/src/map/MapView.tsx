@@ -71,6 +71,9 @@ interface MapViewProps {
   replayMovingOnly: boolean;
   onReplayTime: (t: number) => void;
   onReplaySelect: (mmsi: number | null) => void;
+  onReplayAlertClick: (a: Alert) => void;
+  /** Debounced viewport bounds while replaying, so tracks follow pan/zoom. */
+  onReplayViewportChange: (bbox: [number, number, number, number]) => void;
   theme: "light" | "dark";
   highlightTrack: [number, number, number][] | null;
   highlightColor: [number, number, number];
@@ -125,6 +128,8 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
     replayMovingOnly,
     onReplayTime,
     onReplaySelect,
+    onReplayAlertClick,
+    onReplayViewportChange,
     theme,
     highlightTrack,
     highlightColor,
@@ -193,11 +198,9 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
   const onReplayTimeRef = useRef(onReplayTime);
   onReplayTimeRef.current = onReplayTime;
 
-  // Reset to the window start whenever the replay window (re)loads.
-  useEffect(() => {
-    if (replayMode && replayRange) setTime(replayRange.start);
-  }, [replayMode, replayRange, setTime]);
-
+  // Note: the clock is positioned by the app (one-time seek to the data start on
+  // entering replay) rather than auto-reset here — auto-resetting on range
+  // changes jolted the scrubber every time the bbox refetched on pan/zoom.
   useEffect(() => {
     if (!replayMode || !replayRange) return;
     const { start, end } = replayRange;
@@ -220,7 +223,19 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [replayMode, replayRange, setTime]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [replayMode, replayRange?.start, replayRange?.end, setTime]);
+
+  // While replaying, follow the viewport: 500ms after pan/zoom settles, report
+  // the new bounds so the tracks refetch for the area you're looking at.
+  useEffect(() => {
+    if (!replayMode) return;
+    const id = setTimeout(
+      () => onReplayViewportChange(boundsFromViewState(viewState)),
+      500,
+    );
+    return () => clearTimeout(id);
+  }, [replayMode, viewState, onReplayViewportChange]);
 
   useImperativeHandle(ref, () => ({
     flyTo: (t) =>
@@ -265,21 +280,7 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
       setTime(clamped);
       onReplayTime(clamped);
     },
-    getBounds: () => {
-      const vp = new WebMercatorViewport({
-        ...(viewState as Record<string, number>),
-        width: window.innerWidth || 1280,
-        height: window.innerHeight || 800,
-      });
-      const [x0, y0] = vp.unproject([0, 0]);
-      const [x1, y1] = vp.unproject([vp.width, vp.height]);
-      return [
-        Math.min(x0, x1),
-        Math.min(y0, y1),
-        Math.max(x0, x1),
-        Math.max(y0, y1),
-      ];
-    },
+    getBounds: () => boundsFromViewState(viewState),
     fit: () =>
       setViewState((prev) => ({
         ...prev,
@@ -340,6 +341,7 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
             windowSec: replayRange ? replayRange.end - replayRange.start : 3600,
             selectedMmsi,
             onClick: onReplaySelect,
+            onAlertClick: onReplayAlertClick,
           })
         : [
       // Fences render beneath vessels; the draft preview sits on top.
@@ -390,6 +392,7 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
       replayMovingOnly,
       replayRange,
       onReplaySelect,
+      onReplayAlertClick,
       vessels,
       version,
       viewState,
@@ -522,6 +525,20 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
       )}
     </>
   );
+}
+
+/** Viewport bounds as [west, south, east, north] from a deck viewState. */
+function boundsFromViewState(
+  viewState: Record<string, unknown>,
+): [number, number, number, number] {
+  const vp = new WebMercatorViewport({
+    ...(viewState as Record<string, number>),
+    width: window.innerWidth || 1280,
+    height: window.innerHeight || 800,
+  });
+  const [x0, y0] = vp.unproject([0, 0]);
+  const [x1, y1] = vp.unproject([vp.width, vp.height]);
+  return [Math.min(x0, x1), Math.min(y0, y1), Math.max(x0, x1), Math.max(y0, y1)];
 }
 
 function buildTooltip(v: TrackedVessel | null) {

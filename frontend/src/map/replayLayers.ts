@@ -64,10 +64,12 @@ export interface ReplayLayerOptions {
   windowSec: number; // replay window length (the persist-everything trail length)
   selectedMmsi: number | null;
   onClick: (mmsi: number | null) => void;
+  onAlertClick: (a: Alert) => void;
 }
 
-// In comet mode, how far back the bright tail reaches before fading out.
-const COMET_SEC = 900;
+// In comet mode, how far back the bright tail reaches before fading out — a
+// short tail flowing behind each vessel, not a permanent route.
+const COMET_SEC = 600;
 
 /** A vessel's interpolated position at the scrub time. */
 interface Head {
@@ -102,6 +104,7 @@ export function buildReplayLayers(opts: ReplayLayerOptions) {
     windowSec,
     selectedMmsi,
     onClick,
+    onAlertClick,
   } = opts;
   const layers: unknown[] = [];
 
@@ -114,8 +117,8 @@ export function buildReplayLayers(opts: ReplayLayerOptions) {
   // Zoom cross-fades: routes carry the wide view, heads only the close view, and
   // a traffic heat takes over when zoomed right out.
   const lineOpacity = 0.3 + 0.7 * clamp01((zoom - 4) / 2); // 0.3 @4 → 1 @6+
-  const headOpacity = clamp01((zoom - 7) / 2); // 0 @7 → 1 @9+
-  const heatOpacity = 1 - clamp01((zoom - 4.5) / 2); // 1 @4.5 → 0 @6.5+
+  const headOpacity = clamp01((zoom - 5.5) / 1.5); // 0 @5.5 → 1 @7+ (visible at Channel zoom)
+  const heatOpacity = 1 - clamp01((zoom - 5) / 1.5); // 1 @5 → 0 @6.5+
 
   // --- colour helpers (per colour mode) ---
   const baseRgb = (d: ReplayTrack): RGB =>
@@ -129,9 +132,9 @@ export function buildReplayLayers(opts: ReplayLayerOptions) {
       ? (d: ReplayTrack) =>
           d.path.map((p) => {
             const c = speedColor(p[3]);
-            return [c[0], c[1], c[2], 34] as [number, number, number, number];
+            return [c[0], c[1], c[2], 48] as [number, number, number, number];
           })
-      : (d: ReplayTrack) => [...baseRgb(d), 34] as [number, number, number, number];
+      : (d: ReplayTrack) => [...baseRgb(d), 48] as [number, number, number, number];
   const headRgb = (d: Head): RGB =>
     colorMode === "speed"
       ? speedColor(d.sog)
@@ -139,9 +142,10 @@ export function buildReplayLayers(opts: ReplayLayerOptions) {
         ? colorRgbFor(d.ship_type)
         : MONO;
 
-  // 1. Faint full-route underlay (full mode only) — the lane structure, visible
-  //    even before the playhead reaches it.
-  if (persistent && lineOpacity > 0.01) {
+  // 1. Faint full-track underlay — the thin line of the whole route each vessel
+  //    took, so you can watch the vessel (and its comet tail) travel along it.
+  //    Drawn in both modes; the comet's bright tail rides on top of this.
+  if (lineOpacity > 0.01) {
     layers.push(
       new PathLayer<ReplayTrack>({
         id: "replay-routes-base",
@@ -149,8 +153,8 @@ export function buildReplayLayers(opts: ReplayLayerOptions) {
         getPath: (d) => d.path.map((p) => [p[0], p[1]] as [number, number]),
         getColor: underlayColor,
         opacity: lineOpacity,
-        widthMinPixels: 1,
-        widthMaxPixels: 2,
+        widthMinPixels: 0.7,
+        widthMaxPixels: 1.5,
         capRounded: true,
         jointRounded: true,
         updateTriggers: { getColor: colorMode },
@@ -168,7 +172,9 @@ export function buildReplayLayers(opts: ReplayLayerOptions) {
       trailLength,
       currentTime,
       fadeTrail,
-      capRounded: true,
+      // Flat cap: a rounded cap puts a half-width blob on the leading end that
+      // overhangs the vessel's position and reads as a "thick line in front".
+      capRounded: false,
       jointRounded: true,
       updateTriggers: { getColor: colorMode },
     } as const;
@@ -177,18 +183,18 @@ export function buildReplayLayers(opts: ReplayLayerOptions) {
       new TripsLayer<ReplayTrack>({
         id: "replay-glow",
         ...trailProps,
-        opacity: 0.18 * lineOpacity,
-        widthMinPixels: 5,
-        widthMaxPixels: 10,
+        opacity: 0.1 * lineOpacity,
+        widthMinPixels: 2,
+        widthMaxPixels: 4,
       }),
     );
     layers.push(
       new TripsLayer<ReplayTrack>({
         id: "replay-trails",
         ...trailProps,
-        opacity: lineOpacity,
-        widthMinPixels: 1.8,
-        widthMaxPixels: 4,
+        opacity: 0.8 * lineOpacity,
+        widthMinPixels: 1,
+        widthMaxPixels: 2,
       }),
     );
   }
@@ -202,8 +208,9 @@ export function buildReplayLayers(opts: ReplayLayerOptions) {
           id: "replay-route",
           data: [sel],
           getPath: (d) => d.path.map((p) => [p[0], p[1]] as [number, number]),
-          getColor: [235, 240, 255, 150],
-          widthMinPixels: 2,
+          getColor: [235, 240, 255, 170],
+          widthMinPixels: 1.5,
+          widthMaxPixels: 2.5,
           capRounded: true,
           jointRounded: true,
         }),
@@ -292,17 +299,23 @@ export function buildReplayLayers(opts: ReplayLayerOptions) {
   const fired = alerts.filter((a) => a.ts <= currentTime && a.lat != null && a.lon != null);
   if (fired.length > 0) {
     layers.push(
+      // Ring (not a filled disc) so overlapping alerts read as concentric rings
+      // rather than merging into one solid yellow blob at busy spots.
+      // The whole disc (ring + a generous invisible hit area) is clickable, so
+      // alerts in a tight cluster are easy to grab — not just a 3px centre.
       new ScatterplotLayer<Alert>({
         id: "replay-alert-halo",
         data: fired,
+        pickable: true,
         getPosition: (d) => [d.lon as number, d.lat as number],
-        getFillColor: [...ALERT_COLOR, 45],
-        getRadius: 16,
-        radiusUnits: "pixels",
-        stroked: true,
-        getLineColor: [...ALERT_COLOR, 220],
-        lineWidthMinPixels: 1.5,
         filled: true,
+        getFillColor: [...ALERT_COLOR, 12], // near-invisible fill enlarges the hit area
+        stroked: true,
+        getLineColor: [...ALERT_COLOR, 180],
+        lineWidthMinPixels: 1.5,
+        getRadius: 9,
+        radiusUnits: "pixels",
+        onClick: (info) => info.object && onAlertClick(info.object as Alert),
         updateTriggers: { getPosition: fired },
       }),
       new ScatterplotLayer<Alert>({
@@ -314,9 +327,9 @@ export function buildReplayLayers(opts: ReplayLayerOptions) {
         getLineColor: [20, 20, 20, 220],
         stroked: true,
         lineWidthMinPixels: 1,
-        getRadius: 4,
+        getRadius: 3,
         radiusUnits: "pixels",
-        onClick: (info) => onClick((info.object as Alert)?.mmsi ?? null),
+        onClick: (info) => info.object && onAlertClick(info.object as Alert),
         updateTriggers: { getPosition: fired },
       }),
     );

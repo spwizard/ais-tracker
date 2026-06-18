@@ -17,6 +17,7 @@ import { AlertToasts, type ToastAlert } from "@/panels/AlertToasts";
 import { OwnershipGraph } from "@/panels/OwnershipGraph";
 import { DensityTimeline } from "@/panels/DensityTimeline";
 import { ReplayTimeline } from "@/panels/ReplayTimeline";
+import { AlertCard } from "@/panels/AlertCard";
 import { ForecastTimeline } from "@/panels/ForecastTimeline";
 import { MapLegend } from "@/panels/MapLegend";
 import { AnalystPanel } from "@/panels/AnalystPanel";
@@ -101,12 +102,15 @@ export default function App() {
   const replayAvailable = useFlag("replay");
   const [replayMode, setReplayMode] = useState(false);
   const [replayPlaying, setReplayPlaying] = useState(true);
-  const [replaySpeed, setReplaySpeed] = useState(60);
+  const [replaySpeed, setReplaySpeed] = useState(100);
   const [replayWindow, setReplayWindow] = useState<ReplayWindow | null>(null);
   // Scrub time reported back from the map clock (~4Hz) — drives the readout only.
   const [replayTime, setReplayTime] = useState(0);
   const [replaySelectedMmsi, setReplaySelectedMmsi] = useState<number | null>(null);
-  const [replayTrailMode, setReplayTrailMode] = useState<TrailMode>("full");
+  // Alert clicked in replay → a card showing it; alerts stacked on one spot are
+  // grouped so you can page through them (e.g. a geofence firing repeatedly).
+  const [alertCard, setAlertCard] = useState<{ alerts: Alert[]; index: number } | null>(null);
+  const [replayTrailMode, setReplayTrailMode] = useState<TrailMode>("comet");
   const [replayColorMode, setReplayColorMode] = useState<ColorMode>("speed");
   const [replayMovingOnly, setReplayMovingOnly] = useState(false);
   const REPLAY_WINDOW_SEC = 24 * 3600;
@@ -114,8 +118,9 @@ export default function App() {
   const replay = useReplay(replayMode ? replayWindow : null);
   const replayAlerts = useReplayAlerts(replayMode ? replayWindow : null);
 
-  // Clamp the scrub range to what the server actually has, so the slider can't
-  // run past the data. Falls back to the requested window when the store is empty.
+  // Slider range = requested window clamped to the store's actual data span, so
+  // the scrubber doesn't cover empty time. `span` is the whole store's min/max
+  // (not per-bbox), so it's stable across pan/zoom — only drifting by seconds.
   const replayRange = useMemo(() => {
     if (!replayWindow) return null;
     let { start, end } = replayWindow;
@@ -125,6 +130,33 @@ export default function App() {
     }
     return end > start ? { start, end } : { start: replayWindow.start, end: replayWindow.end };
   }, [replayWindow, replay.span]);
+
+  // Position the clock at the data start ONCE per replay session, after the first
+  // fetch lands — not on every refetch (which would jolt the playhead on pan).
+  const replaySeekedRef = useRef(false);
+  useEffect(() => {
+    if (!replayMode) replaySeekedRef.current = false;
+  }, [replayMode]);
+  useEffect(() => {
+    if (replayMode && !replaySeekedRef.current && replay.span) {
+      replaySeekedRef.current = true;
+      mapRef.current?.seek(replay.span[0]);
+    }
+  }, [replayMode, replay.span]);
+
+  // Tracks follow the map: update only the bbox (keep the time window + scrub
+  // position). Ignore sub-threshold changes so we don't refetch on tiny nudges.
+  const onReplayViewportChange = useCallback(
+    (bbox: [number, number, number, number]) => {
+      setReplayWindow((w) => {
+        if (!w) return w;
+        const b = w.bbox;
+        if (b && b.every((v, i) => Math.abs(v - bbox[i]) < 1e-4)) return w;
+        return { ...w, bbox };
+      });
+    },
+    [],
+  );
 
   const toggleReplay = useCallback((on: boolean) => {
     if (on) {
@@ -138,9 +170,38 @@ export default function App() {
       setReplayMode(true);
     } else {
       setReplayMode(false);
+      setAlertCard(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [REPLAY_WINDOW_SEC]);
+
+  // Click an alert marker → card for it + every alert stacked on the same spot,
+  // and highlight the related vessel's route.
+  const onReplayAlertClick = useCallback(
+    (a: Alert) => {
+      const near = (x: Alert) =>
+        x.lat != null &&
+        x.lon != null &&
+        a.lat != null &&
+        a.lon != null &&
+        x.ts <= replayTime && // only alerts already surfaced at the scrub time
+        Math.abs(x.lat - a.lat) < 0.015 &&
+        Math.abs(x.lon - a.lon) < 0.015;
+      const group = replayAlerts.filter(near);
+      const index = Math.max(0, group.findIndex((x) => x.id === a.id));
+      setAlertCard({ alerts: group.length ? group : [a], index });
+      setReplaySelectedMmsi(a.mmsi);
+    },
+    [replayAlerts, replayTime],
+  );
+
+  const setAlertIndex = useCallback((i: number) => {
+    setAlertCard((cur) => {
+      if (!cur) return cur;
+      setReplaySelectedMmsi(cur.alerts[i]?.mmsi ?? null);
+      return { ...cur, index: i };
+    });
+  }, []);
   const [showSelectedTrack, setShowSelectedTrack] = useState(false);
   const mapRef = useRef<MapHandle>(null);
 
@@ -385,6 +446,15 @@ export default function App() {
     }
   };
 
+  // Selecting a vessel from the replay view: highlight its route AND, when the
+  // vessel is still transmitting, open the detail panel (which reads live state).
+  const selectReplayVessel = (mmsi: number | null) => {
+    setReplaySelectedMmsi(mmsi);
+    if (mmsi == null) return;
+    const v = vesselsRef.current.get(mmsi);
+    if (v) selectVessel(v); // no-op panel if the vessel has gone dark since
+  };
+
   // Build the draggable-chrome props the FloatingPanel needs.
   const chromeFor = (id: PanelId): PanelChrome => ({
     position: { x: panels[id].x, y: panels[id].y },
@@ -419,7 +489,9 @@ export default function App() {
         replayColorMode={replayColorMode}
         replayMovingOnly={replayMovingOnly}
         onReplayTime={setReplayTime}
-        onReplaySelect={setReplaySelectedMmsi}
+        onReplaySelect={selectReplayVessel}
+        onReplayAlertClick={onReplayAlertClick}
+        onReplayViewportChange={onReplayViewportChange}
         theme={theme}
         highlightTrack={
           showSelectedTrack && selectedVisible && selectedTrack.length >= 2
@@ -513,6 +585,7 @@ export default function App() {
             replayMode={replayMode}
             onToggleReplay={toggleReplay}
             replayAvailable={replayAvailable}
+            replayLoading={replay.loading}
             onJump={handleJump}
           />
         )}
@@ -591,6 +664,15 @@ export default function App() {
           <DensityTimeline buckets={buckets} onSelect={onTimelineSelect} />
         )}
 
+        {replayMode && replay.loading && (
+          <div className="pointer-events-none absolute left-1/2 top-1/2 z-40 -translate-x-1/2 -translate-y-1/2">
+            <div className="glass flex items-center gap-3 px-5 py-3 text-sm">
+              <span className="h-2 w-2 animate-ping rounded-full bg-primary" />
+              Loading replay tracks…
+            </div>
+          </div>
+        )}
+
         {replayMode && replayRange && (
           <ReplayTimeline
             range={replayRange}
@@ -609,6 +691,16 @@ export default function App() {
             onExit={() => toggleReplay(false)}
             loading={replay.loading}
             trackCount={replay.tracks.length}
+          />
+        )}
+
+        {replayMode && alertCard && (
+          <AlertCard
+            alerts={alertCard.alerts}
+            index={alertCard.index}
+            onIndex={setAlertIndex}
+            onSelectVessel={selectReplayVessel}
+            onClose={() => setAlertCard(null)}
           />
         )}
 

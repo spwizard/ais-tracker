@@ -1,4 +1,4 @@
-import { Layers, Route, Navigation, Flame, Wind, Waves, History } from "lucide-react";
+import { Layers, Route, Navigation, Flame, Wind, Waves, History, Loader2 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -20,6 +20,7 @@ interface LayerControlsProps {
   replayMode: boolean;
   onToggleReplay: (v: boolean) => void;
   replayAvailable: boolean;
+  replayLoading: boolean;
   onJump: (target: ViewTarget) => void;
 }
 
@@ -50,6 +51,7 @@ export function LayerControls({
   replayMode,
   onToggleReplay,
   replayAvailable,
+  replayLoading,
   onJump,
 }: LayerControlsProps) {
   return (
@@ -107,6 +109,12 @@ export function LayerControls({
             <p className="px-1 text-[10px] leading-snug text-muted-foreground/60">
               Scrub recent vessel tracks in view through time. Pauses the live feed.
             </p>
+            {replayMode && replayLoading && (
+              <div className="flex items-center gap-2 px-1 text-[11px] text-primary">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Loading tracks…
+              </div>
+            )}
           </>
         )}
 

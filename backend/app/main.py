@@ -23,6 +23,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -342,6 +343,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# Replay/snapshot payloads are large numeric JSON — gzip shrinks them ~10-20×.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 
 def _source_status(src) -> dict:
@@ -441,11 +444,12 @@ async def replay(
     tracks = await asyncio.to_thread(
         app.state.history.tracks, int(start), int(end), box
     )
+    # Names from the in-memory registry only (a dict lookup) — no per-track
+    # `await store.get`, which on a wide window meant tens of thousands of awaits.
     registry = app.state.registry
     if registry is not None:
         for t in tracks:
-            v = await app.state.store.get(t["mmsi"])
-            t["name"] = (v.name if v else None) or registry.name(t["mmsi"])
+            t["name"] = registry.name(t["mmsi"])
 
     points = sum(len(t["path"]) for t in tracks)
     log.info(

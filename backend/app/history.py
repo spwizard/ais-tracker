@@ -115,7 +115,18 @@ class TrackHistory:
             # ship_type can arrive late; keep the most recent non-null value.
             if ship_type is not None:
                 t["ship_type"] = ship_type
-            t["path"].append([lon, lat, ts, sog, cog, heading])
+            # Round to trim payload (and help gzip): ~1 m of lon/lat precision,
+            # 0.1 kn / 0.1° is plenty for replay. ts stays an int.
+            t["path"].append(
+                [
+                    round(lon, 5),
+                    round(lat, 5),
+                    ts,
+                    round(sog, 1) if sog is not None else None,
+                    round(cog, 1) if cog is not None else None,
+                    round(heading) if heading is not None else None,
+                ]
+            )
 
         tracks = [t for t in grouped.values() if len(t["path"]) >= 2]
         for t in tracks:
