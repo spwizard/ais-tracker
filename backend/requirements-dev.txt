@@ -1,0 +1,3 @@
+# Dev/test-only dependencies (not installed on the deployed box).
+-r requirements.txt
+pytest>=8.0

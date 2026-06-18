@@ -5,53 +5,23 @@ import type { ReplayTrack, Alert } from "@/types";
 import { colorRgbFor } from "@/lib/shipTypes";
 import { HEAT_COLOR_RANGE } from "./layers";
 import { getIconAtlas, ICON_MAPPING } from "./vesselIcons";
+import {
+  type TrailMode,
+  type ColorMode,
+  type RGB,
+  type Head,
+  MONO,
+  speedColor,
+  clamp01,
+  interpolate,
+} from "./replayMath";
 
-export type TrailMode = "full" | "comet";
-export type ColorMode = "speed" | "type" | "mono";
+// Re-exported so existing import sites (App, MapView, MapLegend, ReplayTimeline)
+// keep importing these from "./replayLayers".
+export { speedColor, SPEED_RAMP, SPEED_MAX_KN } from "./replayMath";
+export type { TrailMode, ColorMode } from "./replayMath";
 
-type RGB = [number, number, number];
-
-// Speed → colour ramp (knots → RGB), tuned to pop on the dark basemap: a muted
-// indigo for near-stationary, climbing through cyan/green to a hot red for fast
-// transits. Lets the lanes read as "where vessels move fast vs. manoeuvre/loiter".
-const SPEED_STOPS: [number, RGB][] = [
-  [0, [72, 92, 160]],
-  [2, [56, 135, 230]],
-  [5, [34, 211, 238]],
-  [9, [74, 222, 128]],
-  [13, [250, 204, 21]],
-  [17, [249, 115, 22]],
-  [22, [239, 68, 68]],
-];
-export const SPEED_RAMP = SPEED_STOPS;
-export const SPEED_MAX_KN = 22;
-
-// Monochrome route colour (clean MapWeave-style white-blue).
-const MONO: RGB = [210, 225, 255];
 const ALERT_COLOR: RGB = [250, 204, 21]; // amber
-
-/** Interpolated colour for a speed-over-ground in knots. */
-export function speedColor(sog: number | null): RGB {
-  const v = sog ?? 0;
-  if (v <= SPEED_STOPS[0][0]) return SPEED_STOPS[0][1];
-  for (let i = 1; i < SPEED_STOPS.length; i++) {
-    const [hi, cHi] = SPEED_STOPS[i];
-    if (v <= hi) {
-      const [lo, cLo] = SPEED_STOPS[i - 1];
-      const f = (v - lo) / (hi - lo);
-      return [
-        Math.round(cLo[0] + (cHi[0] - cLo[0]) * f),
-        Math.round(cLo[1] + (cHi[1] - cLo[1]) * f),
-        Math.round(cLo[2] + (cHi[2] - cLo[2]) * f),
-      ];
-    }
-  }
-  return SPEED_STOPS[SPEED_STOPS.length - 1][1];
-}
-
-function clamp01(x: number): number {
-  return Math.min(1, Math.max(0, x));
-}
 
 export interface ReplayLayerOptions {
   tracks: ReplayTrack[];
@@ -70,16 +40,6 @@ export interface ReplayLayerOptions {
 // In comet mode, how far back the bright tail reaches before fading out — a
 // short tail flowing behind each vessel, not a permanent route.
 const COMET_SEC = 600;
-
-/** A vessel's interpolated position at the scrub time. */
-interface Head {
-  mmsi: number;
-  ship_type: number | null;
-  position: [number, number];
-  angle: number; // compass degrees (clockwise from north)
-  sog: number; // speed over ground, knots
-  moving: boolean;
-}
 
 function everMoves(t: ReplayTrack): boolean {
   return t.path.some((p) => (p[3] ?? 0) > 0.5);
@@ -218,13 +178,17 @@ export function buildReplayLayers(opts: ReplayLayerOptions) {
     }
   }
 
-  // Interpolate each track to the scrub time.
+  // Interpolate each track to the scrub time — but only when something that uses
+  // it is on screen (heads or the heat). Skipping this when zoomed out avoids an
+  // O(tracks) pass every animation frame.
   let heads: Head[] = [];
-  for (const t of tracks) {
-    const h = interpolate(t, currentTime);
-    if (h) heads.push(h);
+  if (headOpacity > 0.01 || heatOpacity > 0.01) {
+    for (const t of tracks) {
+      const h = interpolate(t, currentTime);
+      if (h) heads.push(h);
+    }
+    if (movingOnly) heads = heads.filter((h) => h.moving);
   }
-  if (movingOnly) heads = heads.filter((h) => h.moving);
 
   // Far-out traffic heat — where the action is, without thousands of marks.
   if (heatOpacity > 0.01 && heads.length > 0) {
@@ -336,46 +300,4 @@ export function buildReplayLayers(opts: ReplayLayerOptions) {
   }
 
   return layers;
-}
-
-/** Linearly interpolate a track to time `t`. Returns null when `t` falls outside
- *  the track's recorded span (the vessel hasn't appeared yet, or has gone). */
-function interpolate(track: ReplayTrack, t: number): Head | null {
-  const path = track.path;
-  const n = path.length;
-  if (n === 0) return null;
-  if (t < path[0][2] || t > path[n - 1][2]) return null;
-
-  // Binary search for the segment [i, i+1] bracketing t.
-  let lo = 0;
-  let hi = n - 1;
-  while (hi - lo > 1) {
-    const mid = (lo + hi) >> 1;
-    if (path[mid][2] <= t) lo = mid;
-    else hi = mid;
-  }
-  const a = path[lo];
-  const b = path[hi];
-  const span = b[2] - a[2];
-  const f = span > 0 ? (t - a[2]) / span : 0;
-
-  const lon = a[0] + (b[0] - a[0]) * f;
-  const lat = a[1] + (b[1] - a[1]) * f;
-  const sog = a[3] ?? 0;
-  const moving = sog > 0.5;
-  // Prefer course/heading from the bracketing fix; fall back to the segment
-  // bearing so the arrow always points the way the vessel is travelling.
-  const angle = a[4] ?? a[5] ?? bearing(a[0], a[1], b[0], b[1]);
-
-  return { mmsi: track.mmsi, ship_type: track.ship_type, position: [lon, lat], angle, sog, moving };
-}
-
-/** Initial great-circle bearing from (lon1,lat1) to (lon2,lat2), degrees. */
-function bearing(lon1: number, lat1: number, lon2: number, lat2: number): number {
-  const φ1 = (lat1 * Math.PI) / 180;
-  const φ2 = (lat2 * Math.PI) / 180;
-  const Δλ = ((lon2 - lon1) * Math.PI) / 180;
-  const y = Math.sin(Δλ) * Math.cos(φ2);
-  const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
-  return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
 }

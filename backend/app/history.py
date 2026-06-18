@@ -23,6 +23,12 @@ log = logging.getLogger("history")
 # TripsLayer geometry — sane. Plenty smooth for playback.
 MAX_POINTS_PER_TRACK = 1500
 
+# Cap how many vessel tracks one request returns. A very wide (zoomed-out) bbox
+# can otherwise pull tens of thousands of tracks — a huge payload to build, send,
+# and animate. When over the cap we keep the longest tracks (the vessels that
+# actually moved) and log the drop, so a runaway view degrades gracefully.
+MAX_TRACKS = 4000
+
 
 class TrackHistory:
     def __init__(self, path: str, window_sec: int) -> None:
@@ -129,6 +135,10 @@ class TrackHistory:
             )
 
         tracks = [t for t in grouped.values() if len(t["path"]) >= 2]
+        if len(tracks) > MAX_TRACKS:
+            tracks.sort(key=lambda t: len(t["path"]), reverse=True)
+            log.info("replay tracks capped: %d → %d (widen out)", len(tracks), MAX_TRACKS)
+            tracks = tracks[:MAX_TRACKS]
         for t in tracks:
             t["path"] = _decimate(t["path"], MAX_POINTS_PER_TRACK)
         return tracks

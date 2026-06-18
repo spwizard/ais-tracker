@@ -327,6 +327,10 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
     },
   }));
 
+  // Only zoom affects the layer stack — depending on the whole viewState would
+  // rebuild every layer (and re-interpolate all vessel heads) on each pan frame.
+  const zoom = (viewState.zoom as number) ?? 7;
+
   const layers = useMemo(
     () =>
       replayMode
@@ -334,7 +338,7 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
             tracks: replayTracks,
             alerts: replayAlerts,
             currentTime,
-            zoom: (viewState.zoom as number) ?? 7,
+            zoom,
             trailMode: replayTrailMode,
             colorMode: replayColorMode,
             movingOnly: replayMovingOnly,
@@ -357,7 +361,7 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
       ...buildLayers({
         data: vessels,
         version,
-        zoom: (viewState.zoom as number) ?? 7,
+        zoom,
         densityMode,
         drawing,
         showTrails,
@@ -395,7 +399,7 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
       onReplayAlertClick,
       vessels,
       version,
-      viewState,
+      zoom,
       densityMode,
       drawing,
       showTrails,
