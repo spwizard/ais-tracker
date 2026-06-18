@@ -19,6 +19,7 @@ import type { TrackedVessel, DensityPoint, WeatherMeta, ReplayTrack, Alert } fro
 import { NAV_STATUS, colorHexFor } from "@/lib/shipTypes";
 import { buildLayers } from "./layers";
 import { buildReplayLayers, type TrailMode, type ColorMode } from "./replayLayers";
+import { advanceClock } from "./replayMath";
 import { buildFenceLayers, buildDraftLayers } from "./geofenceLayers";
 import { useGeofenceDraw, type DrawResult } from "@/hooks/useGeofenceDraw";
 import type { CompiledFence } from "@/geofence/geometry";
@@ -211,9 +212,7 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
       const dt = (now - last) / 1000;
       last = now;
       if (playingRef.current && !document.hidden) {
-        let next = timeRef.current + dt * speedRef.current;
-        if (next >= end || next < start) next = start; // loop
-        setTime(next);
+        setTime(advanceClock(timeRef.current, dt, speedRef.current, start, end));
       }
       if (now - lastReport > 250) {
         lastReport = now;

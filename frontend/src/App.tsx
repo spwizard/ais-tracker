@@ -27,6 +27,7 @@ import type { Alert } from "@/types";
 import { useDensity } from "@/hooks/useDensity";
 import { useReplay, type ReplayWindow } from "@/hooks/useReplay";
 import { useReplayAlerts } from "@/hooks/useReplayAlerts";
+import { alertsAt } from "@/lib/replayAlerts";
 import type { TrailMode, ColorMode } from "@/map/replayLayers";
 import { useWeather, useWaves } from "@/hooks/useWeather";
 import { useFlag } from "@/hooks/useFlags";
@@ -179,17 +180,8 @@ export default function App() {
   // and highlight the related vessel's route.
   const onReplayAlertClick = useCallback(
     (a: Alert) => {
-      const near = (x: Alert) =>
-        x.lat != null &&
-        x.lon != null &&
-        a.lat != null &&
-        a.lon != null &&
-        x.ts <= replayTime && // only alerts already surfaced at the scrub time
-        Math.abs(x.lat - a.lat) < 0.015 &&
-        Math.abs(x.lon - a.lon) < 0.015;
-      const group = replayAlerts.filter(near);
-      const index = Math.max(0, group.findIndex((x) => x.id === a.id));
-      setAlertCard({ alerts: group.length ? group : [a], index });
+      const { group, index } = alertsAt(replayAlerts, a, replayTime);
+      setAlertCard({ alerts: group, index });
       setReplaySelectedMmsi(a.mmsi);
     },
     [replayAlerts, replayTime],

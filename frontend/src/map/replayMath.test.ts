@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { speedColor, interpolate, bearing, SPEED_RAMP, SPEED_MAX_KN } from "./replayMath";
+import {
+  speedColor,
+  interpolate,
+  bearing,
+  advanceClock,
+  SPEED_RAMP,
+  SPEED_MAX_KN,
+} from "./replayMath";
 import type { ReplayTrack } from "@/types";
 
 describe("speedColor", () => {
@@ -78,5 +85,23 @@ describe("bearing", () => {
   it("is ~90° due east and ~0° due north", () => {
     expect(bearing(0, 0, 1, 0)).toBeCloseTo(90, 1);
     expect(bearing(0, 0, 0, 1)).toBeCloseTo(0, 1);
+  });
+});
+
+describe("advanceClock", () => {
+  it("advances by dt × speed within range", () => {
+    expect(advanceClock(100, 0.5, 10, 0, 1000)).toBe(105);
+  });
+
+  it("loops back to start when it reaches the end", () => {
+    expect(advanceClock(995, 1, 10, 0, 1000)).toBe(0); // 1005 ≥ end
+  });
+
+  it("loops back to start if somehow below start", () => {
+    expect(advanceClock(-5, 0, 1, 0, 1000)).toBe(0);
+  });
+
+  it("lands exactly at end → loops (end is exclusive)", () => {
+    expect(advanceClock(900, 10, 10, 0, 1000)).toBe(0); // 900 + 100 = 1000
   });
 });

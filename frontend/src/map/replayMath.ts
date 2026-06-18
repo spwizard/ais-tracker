@@ -48,6 +48,19 @@ export function clamp01(x: number): number {
   return Math.min(1, Math.max(0, x));
 }
 
+/** Advance the replay clock by `dtSec` at `speed`×, looping back to `start` once
+ *  it reaches `end` (or somehow falls below `start`). Pure for testability. */
+export function advanceClock(
+  time: number,
+  dtSec: number,
+  speed: number,
+  start: number,
+  end: number,
+): number {
+  const next = time + dtSec * speed;
+  return next >= end || next < start ? start : next;
+}
+
 /** A vessel's interpolated position at the scrub time. */
 export interface Head {
   mmsi: number;
