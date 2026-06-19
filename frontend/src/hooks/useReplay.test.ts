@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
-import { useReplay, type ReplayWindow } from "./useReplay";
+import { useReplay, windowKey, type ReplayWindow } from "./useReplay";
 
 function jsonResponse(payload: unknown) {
   return { json: () => Promise.resolve(payload) } as Response;
@@ -66,5 +66,29 @@ describe("useReplay", () => {
     resolveFirst(); // the stale first response lands late
     await Promise.resolve();
     expect(result.current.tracks).toEqual([{ mmsi: 222 }]); // not overwritten
+  });
+
+  it("does not refetch when a fresh window object has identical values", async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ tracks: [], span: null }));
+    // A new object literal on every render — pre-hardening this looped forever.
+    const { rerender } = renderHook(() => useReplay({ start: 1000, end: 2000 }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    rerender();
+    rerender();
+    await Promise.resolve();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("windowKey", () => {
+  it("is null for a null window", () => {
+    expect(windowKey(null)).toBeNull();
+  });
+  it("is equal for identical values, different across changes", () => {
+    expect(windowKey({ start: 1, end: 2 })).toBe(windowKey({ start: 1, end: 2 }));
+    expect(windowKey({ start: 1, end: 2, bbox: [1, 2, 3, 4] })).not.toBe(
+      windowKey({ start: 1, end: 2 }),
+    );
+    expect(windowKey({ start: 1, end: 2 })).not.toBe(windowKey({ start: 1, end: 9 }));
   });
 });

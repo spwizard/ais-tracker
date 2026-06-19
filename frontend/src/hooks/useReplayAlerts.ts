@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Alert } from "@/types";
-import type { ReplayWindow } from "./useReplay";
+import { windowKey, type ReplayWindow } from "./useReplay";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
@@ -40,7 +40,8 @@ export function useReplayAlerts(window: ReplayWindow | null): Alert[] {
       .catch(() => {
         if (id === reqId.current) setAlerts([]);
       });
-  }, [window]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [windowKey(window)]);
 
   return alerts;
 }

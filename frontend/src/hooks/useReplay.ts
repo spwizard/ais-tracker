@@ -9,6 +9,13 @@ export interface ReplayWindow {
   bbox?: [number, number, number, number]; // west, south, east, north
 }
 
+/** Stable string key for a window's *values*, so effects refetch when the
+ *  range/bbox actually change — not merely when a new object identity is passed
+ *  (which would otherwise loop if a caller builds the window inline each render). */
+export function windowKey(w: ReplayWindow | null): string | null {
+  return w ? `${w.start}|${w.end}|${w.bbox ? w.bbox.join(",") : ""}` : null;
+}
+
 export interface ReplayData {
   tracks: ReplayTrack[];
   /** Earliest/latest stored timestamps server-side, for clamping the scrubber. */
@@ -50,7 +57,9 @@ export function useReplay(window: ReplayWindow | null): ReplayData {
       .catch(() => {
         if (id === reqId.current) setData((d) => ({ ...d, loading: false }));
       });
-  }, [window]);
+    // Keyed on the window's values, not its identity — see windowKey.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [windowKey(window)]);
 
   return data;
 }
