@@ -5,8 +5,10 @@ import { useTheme } from "@/hooks/useTheme";
 import { useSources } from "@/hooks/useSources";
 import { useVesselTrail, type TrailPoint } from "@/hooks/useVesselTrail";
 import { MapView, type MapHandle, type ViewTarget } from "@/map/MapView";
-import { TopBar } from "@/panels/TopBar";
-import { FilterPanel } from "@/panels/FilterPanel";
+import { TopBar, type IslandPanel } from "@/panels/TopBar";
+import { IslandDropdown } from "@/panels/IslandDropdown";
+import { FiltersContent } from "@/panels/FiltersContent";
+import { AlertsContent } from "@/panels/AlertsContent";
 import { StatsPanel } from "@/panels/StatsPanel";
 import { LayerControls } from "@/panels/LayerControls";
 import { VesselDetail } from "@/panels/VesselDetail";
@@ -16,6 +18,7 @@ import { DrawToolbar } from "@/panels/DrawToolbar";
 import { AlertToasts, type ToastAlert } from "@/panels/AlertToasts";
 import { OwnershipGraph } from "@/panels/OwnershipGraph";
 import { DensityTimeline } from "@/panels/DensityTimeline";
+import { GlobalSearchContent } from "@/panels/GlobalSearch";
 import { ReplayTimeline } from "@/panels/ReplayTimeline";
 import { AlertCard } from "@/panels/AlertCard";
 import { ForecastTimeline } from "@/panels/ForecastTimeline";
@@ -31,7 +34,7 @@ import { alertsAt } from "@/lib/replayAlerts";
 import type { TrailMode, ColorMode } from "@/map/replayLayers";
 import { useWeather, useWaves } from "@/hooks/useWeather";
 import { useFlag } from "@/hooks/useFlags";
-import type { DensityPoint } from "@/types";
+import type { DensityPoint, SearchVessel } from "@/types";
 import { useGeofences } from "@/hooks/useGeofences";
 import type { DrawResult } from "@/hooks/useGeofenceDraw";
 import { containsPoint } from "@/geofence/geometry";
@@ -43,8 +46,8 @@ import {
   type Geofence,
 } from "@/geofence/types";
 import type { PanelChrome } from "@/components/FloatingPanel";
-import { defaultFilters, matchesFilter, type Filters } from "@/lib/filters";
-import { colorRgbFor, groupKeyFor } from "@/lib/shipTypes";
+import { defaultFilters, matchesFilter, SPEED_MAX, type Filters } from "@/lib/filters";
+import { colorRgbFor, groupKeyFor, SHIP_TYPE_GROUPS } from "@/lib/shipTypes";
 import type { TrackedVessel } from "@/types";
 
 function fenceName(cat: FenceCategory, fences: Geofence[]): string {
@@ -53,6 +56,8 @@ function fenceName(cat: FenceCategory, fences: Geofence[]): string {
 }
 
 const TRAIL_WINDOW_SEC = 900; // trails fade over the last 15 minutes
+const SEARCH_API = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+const SEARCH_TRACK_COLOR: [number, number, number] = [180, 210, 255];
 
 export default function App() {
   const { vesselsRef, version, status, events, riskEvents, flagged, geofenceSync } =
@@ -427,6 +432,7 @@ export default function App() {
 
   // --- selection <-> detail panel ---------------------------------------
   const selectVessel = (v: TrackedVessel | null) => {
+    setSearchTrack(null); // a live selection (or deselect) clears any dark-vessel track
     setSelectedMmsi(v?.mmsi ?? null);
     if (v) {
       setOpen("detail", true);
@@ -460,6 +466,54 @@ export default function App() {
 
   const handleJump = (t: ViewTarget) => mapRef.current?.flyTo(t);
 
+  // --- island dropdowns (search / filters / alerts) --------------------
+  const [island, setIsland] = useState<IslandPanel | null>(null);
+  const toggleIsland = useCallback(
+    (p: IslandPanel) => setIsland((cur) => (cur === p ? null : p)),
+    [],
+  );
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setIsland((cur) => (cur === "search" ? null : "search"));
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  const filtersActive =
+    filters.status !== "all" ||
+    filters.groups.size !== SHIP_TYPE_GROUPS.length ||
+    filters.speed[0] > 0 ||
+    filters.speed[1] < SPEED_MAX;
+  // A no-longer-live vessel picked from search: draw its last-known track from
+  // the history store and frame it. Live vessels select + fly as usual.
+  const [searchTrack, setSearchTrack] = useState<TrailPoint[] | null>(null);
+  const onSearchVessel = (v: SearchVessel) => {
+    setSearchTrack(null);
+    if (v.live && vesselsRef.current.has(v.mmsi)) {
+      selectByMmsi(v.mmsi);
+      return;
+    }
+    if (v.lat != null && v.lon != null) {
+      mapRef.current?.flyTo({ longitude: v.lon, latitude: v.lat, zoom: 10 });
+      fetch(`${SEARCH_API}/api/vessel/${v.mmsi}/history`)
+        .then((r) => r.json())
+        .then((d: { track: TrailPoint[] }) => {
+          if (d.track && d.track.length >= 2) setSearchTrack(d.track);
+        })
+        .catch(() => void 0);
+    }
+  };
+  const onSearchLocation = (loc: { lat: number; lon: number; zoom?: number }) =>
+    mapRef.current?.flyTo({ longitude: loc.lon, latitude: loc.lat, zoom: loc.zoom ?? 12 });
+  const onSearchIntel = (it: { mmsi: number | null; lat?: number | null; lon?: number | null }) => {
+    if (it.mmsi != null && vesselsRef.current.has(it.mmsi)) selectByMmsi(it.mmsi);
+    else if (it.lat != null && it.lon != null)
+      mapRef.current?.flyTo({ longitude: it.lon, latitude: it.lat, zoom: 11 });
+  };
+
   return (
     <div className="relative h-full w-full overflow-hidden bg-background">
       <MapView
@@ -486,11 +540,12 @@ export default function App() {
         onReplayViewportChange={onReplayViewportChange}
         theme={theme}
         highlightTrack={
-          showSelectedTrack && selectedVisible && selectedTrack.length >= 2
+          searchTrack ??
+          (showSelectedTrack && selectedVisible && selectedTrack.length >= 2
             ? selectedTrack
-            : null
+            : null)
         }
-        highlightColor={highlightColor}
+        highlightColor={searchTrack ? SEARCH_TRACK_COLOR : highlightColor}
         flaggedMmsis={flagged}
         analystMmsis={analystMmsis}
         hoverMmsi={hoverMmsi}
@@ -519,8 +574,10 @@ export default function App() {
           total={allVessels.length}
           visible={filtered.length}
           sources={sources}
-          statusFilter={filters.status}
-          onStatusFilter={(s) => setFilters((f) => ({ ...f, status: s }))}
+          island={island}
+          onToggleIsland={toggleIsland}
+          hasAlerts={toastAlerts.length > 0}
+          filtersActive={filtersActive}
           panelOpen={{
             filters: panels.filters.open,
             stats: panels.stats.open,
@@ -544,16 +601,34 @@ export default function App() {
           onOpenData={openData}
         />
 
-        {panels.filters.open && (
-          <FilterPanel
-            chrome={chromeFor("filters")}
-            filters={filters}
-            onChange={setFilters}
-            countsByGroup={countsByGroup}
-            vessels={allVessels}
-            onSelectVessel={(v) => selectByMmsi(v.mmsi)}
+        <IslandDropdown open={island === "search"} onClose={() => setIsland(null)}>
+          <GlobalSearchContent
+            onClose={() => setIsland(null)}
+            onSelectVessel={onSearchVessel}
+            onSelectAlert={onSelectAlert}
+            onJumpLocation={onSearchLocation}
+            onSelectIntel={onSearchIntel}
           />
-        )}
+        </IslandDropdown>
+
+        <IslandDropdown open={island === "filters"} onClose={() => setIsland(null)}>
+          <FiltersContent filters={filters} onChange={setFilters} countsByGroup={countsByGroup} />
+        </IslandDropdown>
+
+        <IslandDropdown open={island === "alerts"} onClose={() => setIsland(null)}>
+          <AlertsContent
+            alerts={toastAlerts}
+            onSelect={(a) => {
+              onEventClick(a);
+              setIsland(null);
+            }}
+            onSeeAll={() => {
+              openData("alerts");
+              setIsland(null);
+            }}
+          />
+        </IslandDropdown>
+
         {panels.stats.open && (
           <StatsPanel
             chrome={chromeFor("stats")}

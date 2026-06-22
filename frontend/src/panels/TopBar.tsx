@@ -3,6 +3,7 @@ import {
   Radio,
   Loader2,
   WifiOff,
+  Search,
   SlidersHorizontal,
   Activity,
   Layers,
@@ -17,19 +18,23 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Hint } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { STATUS_FILTERS, type StatusFilter } from "@/lib/filters";
 import { SourcesIndicator } from "@/panels/SourcesIndicator";
 import type { PanelId } from "@/hooks/usePanels";
 import type { Theme } from "@/hooks/useTheme";
 import type { ConnectionStatus, SourceStatus } from "@/types";
+
+/** Panels that drop from the island as a single shared dropdown surface. */
+export type IslandPanel = "search" | "filters" | "alerts";
 
 interface TopBarProps {
   status: ConnectionStatus;
   total: number;
   visible: number;
   sources: SourceStatus[];
-  statusFilter: StatusFilter;
-  onStatusFilter: (s: StatusFilter) => void;
+  island: IslandPanel | null;
+  onToggleIsland: (p: IslandPanel) => void;
+  hasAlerts: boolean;
+  filtersActive: boolean;
   panelOpen: Record<PanelId, boolean>;
   onTogglePanel: (id: PanelId) => void;
   hasSelection: boolean;
@@ -49,7 +54,6 @@ const STATUS_META: Record<
 };
 
 const DOCK: { id: PanelId; icon: LucideIcon; label: string }[] = [
-  { id: "filters", icon: SlidersHorizontal, label: "Filters" },
   { id: "stats", icon: Activity, label: "Statistics" },
   { id: "layers", icon: Layers, label: "Layers & regions" },
   { id: "zones", icon: Hexagon, label: "Zones & geofences" },
@@ -62,8 +66,10 @@ export function TopBar({
   total,
   visible,
   sources,
-  statusFilter,
-  onStatusFilter,
+  island,
+  onToggleIsland,
+  hasAlerts,
+  filtersActive,
   panelOpen,
   onTogglePanel,
   hasSelection,
@@ -76,7 +82,10 @@ export function TopBar({
   const StatusIcon = meta.icon;
 
   return (
-    <header className="glass pointer-events-auto absolute left-1/2 top-4 z-40 flex h-12 -translate-x-1/2 items-center gap-2 px-2.5 animate-fade-in">
+    <header
+      data-island-bar
+      className="glass pointer-events-auto absolute left-1/2 top-4 z-40 flex h-12 -translate-x-1/2 items-center gap-2 px-2.5 animate-fade-in"
+    >
       {/* Brand */}
       <div className="flex items-center gap-2 pl-1">
         <div className="grid h-7 w-7 place-items-center rounded-lg bg-primary/15 text-primary">
@@ -91,23 +100,22 @@ export function TopBar({
 
       <Separator orientation="vertical" className="h-7" />
 
-      {/* Segmented status filter */}
-      <div className="flex items-center gap-0.5 rounded-lg bg-foreground/5 p-0.5">
-        {STATUS_FILTERS.map((s) => (
-          <button
-            key={s.key}
-            onClick={() => onStatusFilter(s.key)}
-            className={cn(
-              "rounded-md px-3 py-1 text-xs font-medium transition-colors",
-              statusFilter === s.key
-                ? "bg-primary text-primary-foreground shadow"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {s.label}
-          </button>
-        ))}
-      </div>
+      {/* Global search — opens the island search dropdown (⌘K) */}
+      <button
+        onClick={() => onToggleIsland("search")}
+        className={cn(
+          "flex h-8 shrink-0 items-center gap-2 whitespace-nowrap rounded-lg pl-2.5 pr-2 transition-colors",
+          island === "search"
+            ? "bg-foreground/10 text-foreground"
+            : "bg-foreground/5 text-muted-foreground hover:bg-foreground/10 hover:text-foreground",
+        )}
+      >
+        <Search className="h-4 w-4 shrink-0" />
+        <span className="hidden text-xs lg:inline">Search…</span>
+        <kbd className="hidden rounded bg-foreground/10 px-1.5 py-0.5 text-[10px] font-medium lg:inline">
+          ⌘K
+        </kbd>
+      </button>
 
       <Separator orientation="vertical" className="h-7" />
 
@@ -144,6 +152,25 @@ export function TopBar({
 
       {/* Panel dock — reopen / toggle floating panels */}
       <div className="flex items-center gap-0.5 pr-0.5">
+        {/* Filters — island dropdown */}
+        <Hint label="Filters" side="bottom">
+          <button
+            aria-label="Filters"
+            onClick={() => onToggleIsland("filters")}
+            className={cn(
+              "relative grid h-8 w-8 place-items-center rounded-lg transition-colors",
+              island === "filters"
+                ? "bg-primary/15 text-primary"
+                : "text-muted-foreground hover:bg-foreground/10 hover:text-foreground",
+            )}
+          >
+            <SlidersHorizontal className="h-4 w-4" />
+            {filtersActive && (
+              <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-primary" />
+            )}
+          </button>
+        </Hint>
+
         {DOCK.map((d) => {
           const disabled = d.id === "detail" && !hasSelection;
           const active = panelOpen[d.id] && !disabled;
@@ -174,26 +201,40 @@ export function TopBar({
 
         <Separator orientation="vertical" className="mx-0.5 h-7" />
 
-        {/* Data tables — open the bottom sheet */}
-        {([
-          { tab: "vessels" as const, icon: Table2, label: "Vessels table" },
-          { tab: "alerts" as const, icon: Bell, label: "Alerts log" },
-        ]).map((d) => (
-          <Hint key={d.tab} label={d.label} side="bottom">
-            <button
-              aria-label={d.label}
-              onClick={() => onOpenData(d.tab)}
-              className={cn(
-                "grid h-8 w-8 place-items-center rounded-lg transition-colors",
-                dataTab === d.tab
-                  ? "bg-primary/15 text-primary"
-                  : "text-muted-foreground hover:bg-foreground/10 hover:text-foreground",
-              )}
-            >
-              <d.icon className="h-4 w-4" />
-            </button>
-          </Hint>
-        ))}
+        {/* Vessels table */}
+        <Hint label="Vessels table" side="bottom">
+          <button
+            aria-label="Vessels table"
+            onClick={() => onOpenData("vessels")}
+            className={cn(
+              "grid h-8 w-8 place-items-center rounded-lg transition-colors",
+              dataTab === "vessels"
+                ? "bg-primary/15 text-primary"
+                : "text-muted-foreground hover:bg-foreground/10 hover:text-foreground",
+            )}
+          >
+            <Table2 className="h-4 w-4" />
+          </button>
+        </Hint>
+
+        {/* Alerts — recent-events island dropdown */}
+        <Hint label="Recent alerts" side="bottom">
+          <button
+            aria-label="Recent alerts"
+            onClick={() => onToggleIsland("alerts")}
+            className={cn(
+              "relative grid h-8 w-8 place-items-center rounded-lg transition-colors",
+              island === "alerts"
+                ? "bg-primary/15 text-primary"
+                : "text-muted-foreground hover:bg-foreground/10 hover:text-foreground",
+            )}
+          >
+            <Bell className="h-4 w-4" />
+            {hasAlerts && (
+              <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-rose-500" />
+            )}
+          </button>
+        </Hint>
 
         <Separator orientation="vertical" className="mx-0.5 h-7" />
 

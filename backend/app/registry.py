@@ -94,6 +94,42 @@ class VesselRegistry:
         rec = self._mem.get(mmsi)
         return rec.get("name") if rec else None
 
+    def search(self, q: str, limit: int = 20) -> tuple[list[dict], int]:
+        """Search known vessels by name/callsign (substring) or MMSI/IMO (prefix,
+        when the query is numeric). Returns (results, total_match_count). Results
+        are ranked: name prefix > name contains > callsign > numeric id."""
+        ql = q.lower().strip()
+        if not ql:
+            return [], 0
+        numeric = ql.isdigit()
+        hits: list[tuple[int, dict]] = []  # (score, record)
+        for mmsi, rec in self._mem.items():
+            name = (rec.get("name") or "").lower()
+            callsign = (rec.get("callsign") or "").lower()
+            imo = rec.get("imo")
+            score: int | None = None
+            if name.startswith(ql):
+                score = 0
+            elif ql in name:
+                score = 1
+            elif callsign and ql in callsign:
+                score = 2
+            elif numeric and (str(mmsi).startswith(ql) or (imo and str(imo).startswith(ql))):
+                score = 3
+            if score is not None:
+                hits.append((
+                    score,
+                    {
+                        "mmsi": mmsi,
+                        "name": rec.get("name"),
+                        "callsign": rec.get("callsign"),
+                        "imo": imo,
+                        "ship_type": rec.get("ship_type"),
+                    },
+                ))
+        hits.sort(key=lambda h: (h[0], (h[1]["name"] or "").lower()))
+        return [r for _, r in hits[:limit]], len(hits)
+
     def flush(self) -> int:
         """Persist dirty records to SQLite. Cheap (executemany in WAL)."""
         if not self._dirty or self._conn is None:

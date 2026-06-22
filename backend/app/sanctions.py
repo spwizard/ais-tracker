@@ -80,3 +80,30 @@ class SanctionsStore:
 
     def screen_entity(self, name: str | None) -> bool:
         return bool(name) and _norm(name) in self._entities
+
+    def search(self, q: str, limit: int = 20) -> tuple[list[dict], int]:
+        """Sanctioned vessels whose name contains `q` (case-insensitive). Returns
+        (results, total). De-duped across the name index."""
+        ql = q.lower().strip()
+        if not ql or not self.loaded:
+            return [], 0
+        out: list[dict] = []
+        seen: set = set()
+        total = 0
+        for v in self._vessel_names.values():
+            name = v.get("name") or ""
+            if ql not in name.lower():
+                continue
+            key = v.get("imo") or v.get("mmsi") or name
+            if key in seen:
+                continue
+            seen.add(key)
+            total += 1
+            if len(out) < limit:
+                out.append({
+                    "name": v.get("name"),
+                    "imo": v.get("imo"),
+                    "mmsi": v.get("mmsi"),
+                    "program": v.get("program"),
+                })
+        return out, total

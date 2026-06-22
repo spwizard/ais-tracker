@@ -40,6 +40,7 @@ from .registry import VesselRegistry
 from .briefing import BriefingService, BriefingUnavailable
 from .density import DensityRecorder
 from .history import TrackHistory
+from .regions import search_regions
 from .risk import RiskEngine
 from .risk_score import compute_risk
 from .sanctions import SanctionsStore
@@ -405,6 +406,14 @@ async def vessel_trail(mmsi: int):
     return {"mmsi": mmsi, "trail": await app.state.store.trail(mmsi)}
 
 
+@app.get("/api/vessel/{mmsi}/history")
+async def vessel_history(mmsi: int):
+    """Stored track for a vessel from the position-history store — used to show
+    where a no-longer-live vessel last was (and its recent path)."""
+    track = await asyncio.to_thread(app.state.history.vessel_track, mmsi)
+    return {"mmsi": mmsi, "track": track, "last": track[-1] if track else None}
+
+
 @app.get("/api/density")
 async def density_buckets():
     """Available density time-buckets (epoch-second starts) for the timeline."""
@@ -564,6 +573,105 @@ async def alerts(
         limit=limit,
         offset=offset,
     )
+
+
+def _fence_point(f) -> tuple[float, float] | None:
+    """A representative (lon, lat) for a geofence, to fly to."""
+    if f.shape == "circle" and f.center:
+        return f.center
+    pts = f.ring or f.path
+    if pts:
+        return (sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts))
+    return None
+
+
+@app.get("/api/search")
+async def search(q: str, type: str | None = None, limit: int = 6):
+    """Unified global search across vessels, events, locations and intelligence.
+
+    With no `type`, every group is returned capped at `limit` with full `counts`
+    (for the "All" view + "See more"). Pass `type=<group>` (and a larger `limit`)
+    to fetch just one group for its tab."""
+    ql = q.strip()
+    counts = {"vessels": 0, "events": 0, "locations": 0, "intelligence": 0}
+    if len(ql) < 2:
+        return {"q": ql, "vessels": [], "events": [], "locations": [], "intelligence": [], "counts": counts}
+
+    want = lambda c: type is None or type == c  # noqa: E731
+    cap = max(1, min(limit, 50))
+
+    # --- Vessels (registry, enriched with any live position) ---
+    vessels: list[dict] = []
+    if want("vessels") and app.state.registry is not None:
+        rows, counts["vessels"] = app.state.registry.search(ql, cap)
+        for r in rows:
+            v = await app.state.store.get(r["mmsi"])
+            live = bool(v and v.lat is not None and v.lon is not None)
+            r["live"] = live
+            r["last_ts"] = None
+            if live:
+                r["lat"], r["lon"] = v.lat, v.lon
+            else:
+                # Not transmitting now — fall back to its last-known fix from the
+                # history store, so the result still has somewhere to fly to.
+                last = await asyncio.to_thread(app.state.history.last_position, r["mmsi"])
+                r["lat"] = last[1] if last else None
+                r["lon"] = last[0] if last else None
+                r["last_ts"] = last[2] if last else None
+            if not r.get("name") and v and v.name:
+                r["name"] = v.name
+        vessels = rows
+
+    # --- Events (alert history) ---
+    events: list[dict] = []
+    if want("events"):
+        res = await asyncio.to_thread(app.state.alerts.query, search=ql, limit=cap)
+        events, counts["events"] = res["alerts"], res["total"]
+
+    # --- Locations (geofences + region presets) ---
+    locations: list[dict] = []
+    if want("locations"):
+        for f in app.state.geofence_store.list():
+            if ql.lower() in f.name.lower():
+                pt = _fence_point(f)
+                if pt:
+                    locations.append({
+                        "id": f.id, "name": f.name, "kind": "geofence",
+                        "lon": pt[0], "lat": pt[1], "category": f.category,
+                    })
+        regs, _ = search_regions(ql, 50)
+        locations.extend(regs)
+        counts["locations"] = len(locations)
+        locations = locations[:cap]
+
+    # --- Intelligence (sanctioned vessels + recent behavioral findings) ---
+    intelligence: list[dict] = []
+    if want("intelligence"):
+        sres, scount = app.state.sanctions.search(ql, cap)
+        for s in sres:
+            prog = f" · {s['program']}" if s.get("program") else ""
+            intelligence.append({
+                "kind": "sanction", "title": s["name"], "subtitle": f"Sanctioned{prog}",
+                "mmsi": s.get("mmsi"), "imo": s.get("imo"),
+            })
+        rcount = 0
+        risk: list[dict] = []
+        for e in app.state.risk_engine.recent_events(24.0):
+            blob = f"{e.get('title', '')} {e.get('name') or ''} {e.get('name_b') or ''}".lower()
+            if ql.lower() in blob:
+                rcount += 1
+                risk.append({
+                    "kind": "risk", "title": e.get("title"),
+                    "subtitle": e.get("name") or (f"MMSI {e['mmsi']}" if e.get("mmsi") else ""),
+                    "mmsi": e.get("mmsi"), "lat": e.get("lat"), "lon": e.get("lon"), "ts": e.get("ts"),
+                })
+        counts["intelligence"] = scount + rcount
+        intelligence = (intelligence + risk)[:cap]
+
+    return {
+        "q": ql, "vessels": vessels, "events": events,
+        "locations": locations, "intelligence": intelligence, "counts": counts,
+    }
 
 
 @app.get("/api/vessel/{mmsi}/risk")

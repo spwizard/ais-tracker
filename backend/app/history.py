@@ -80,6 +80,29 @@ class TrackHistory:
         cutoff = int(time.time()) - self._window_sec
         self._conn.execute("DELETE FROM positions WHERE ts < ?", (cutoff,))
 
+    def last_position(self, mmsi: int) -> list | None:
+        """Most recent stored fix for a vessel as [lon, lat, ts], or None."""
+        if self._conn is None:
+            return None
+        row = self._conn.execute(
+            "SELECT lon, lat, ts FROM positions WHERE mmsi=? ORDER BY ts DESC LIMIT 1",
+            (mmsi,),
+        ).fetchone()
+        return [row[0], row[1], row[2]] if row else None
+
+    def vessel_track(self, mmsi: int) -> list[list]:
+        """A vessel's stored track as [[lon, lat, ts], ...] (oldest first),
+        decimated to MAX_POINTS_PER_TRACK."""
+        if self._conn is None:
+            return []
+        rows = [
+            [r[0], r[1], r[2]]
+            for r in self._conn.execute(
+                "SELECT lon, lat, ts FROM positions WHERE mmsi=? ORDER BY ts", (mmsi,)
+            )
+        ]
+        return _decimate(rows, MAX_POINTS_PER_TRACK)
+
     def span(self) -> tuple[int, int] | None:
         """Earliest/latest stored timestamps (epoch seconds), or None if empty."""
         if self._conn is None:

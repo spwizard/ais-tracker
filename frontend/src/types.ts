@@ -57,6 +57,48 @@ export interface ReplayTrack {
   path: [number, number, number, number | null, number | null, number | null][];
 }
 
+// --- Global search (GET /api/search) ---
+export interface SearchVessel {
+  mmsi: number;
+  name: string | null;
+  callsign: string | null;
+  imo: number | null;
+  ship_type: number | null;
+  live: boolean;
+  lat: number | null;
+  lon: number | null;
+  /** Last-known fix time (epoch s) for non-live vessels, from the history store. */
+  last_ts?: number | null;
+}
+export interface SearchLocation {
+  id: string;
+  name: string;
+  kind: "geofence" | "region";
+  lat: number;
+  lon: number;
+  zoom?: number;
+  category?: string;
+}
+export interface SearchIntel {
+  kind: "sanction" | "risk";
+  title: string | null;
+  subtitle: string;
+  mmsi: number | null;
+  imo?: number | null;
+  lat?: number | null;
+  lon?: number | null;
+  ts?: number;
+}
+export type SearchCategory = "vessels" | "events" | "locations" | "intelligence";
+export interface SearchResults {
+  q: string;
+  vessels: SearchVessel[];
+  events: Alert[];
+  locations: SearchLocation[];
+  intelligence: SearchIntel[];
+  counts: Record<SearchCategory, number>;
+}
+
 /** A geofence enter/exit/dwell event from the backend evaluator. */
 export interface GeofenceEvent {
   type: "geofence_event";
