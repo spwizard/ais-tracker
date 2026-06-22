@@ -352,6 +352,7 @@ def _source_status(src) -> dict:
     return {
         "name": src.name,
         "connected": src.connected,
+        "receiving": src.receiving,  # connected AND data actually flowing
         "configured": src.configured,
         "messages_seen": src.messages_seen,
     }

@@ -9,12 +9,30 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from abc import ABC, abstractmethod
 
 from ..models import VesselUpdate
 from ..store.base import VesselStore
 
 log = logging.getLogger("source")
+
+# A source that's connected but has had no message for this long is "stale" —
+# the socket is open but no data is flowing (e.g. AISStream accepting the
+# connection while delivering nothing). Reported separately from `connected`.
+STALE_AFTER_SEC = 60.0
+
+
+def _valid_position(lat: float | None, lon: float | None) -> bool:
+    """True for a usable fix. Rejects AIS 'not available' sentinels (lat 91 /
+    lon 181), out-of-range values, and null-island (0, 0) — all junk on a map."""
+    if lat is None or lon is None:
+        return False
+    if not (-90.0 <= lat <= 90.0) or not (-180.0 <= lon <= 180.0):
+        return False
+    if lat == 0.0 and lon == 0.0:
+        return False
+    return True
 
 
 class Source(ABC):
@@ -27,6 +45,12 @@ class Source(ABC):
         self._stop = asyncio.Event()
         self.connected = False
         self.messages_seen = 0
+        self.last_msg_ts = 0.0  # epoch seconds of the most recent message
+
+    @property
+    def receiving(self) -> bool:
+        """Connected AND actually delivering data (not a silent/zombie socket)."""
+        return self.connected and (time.time() - self.last_msg_ts) < STALE_AFTER_SEC
 
     @property
     def configured(self) -> bool:
@@ -51,6 +75,12 @@ class Source(ABC):
         if update is None:
             return
         self.messages_seen += 1
+        self.last_msg_ts = time.time()  # proves the feed is alive, even if junk
+        # Drop unusable positions so vessels never render at (0,0) or the 91/181
+        # "not available" sentinels; static fields in the message still merge.
+        if update.lat is not None and not _valid_position(update.lat, update.lon):
+            update.lat = None
+            update.lon = None
         if self._registry is not None:
             self._registry.record(update)  # remember any static in this message
             self._registry.enrich(update)  # backfill missing static from history

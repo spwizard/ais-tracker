@@ -13,20 +13,30 @@ const SOURCE_LABELS: Record<string, string> = {
   kystverket: "Kystverket · Norway",
 };
 
+/** A source counts as "live" only when actually receiving data — an open but
+ *  silent socket (connected, not receiving) is stale, shown amber not green. */
+function isLive(s: SourceStatus): boolean {
+  return s.receiving ?? s.connected; // tolerate older payloads without `receiving`
+}
+
 /** Compact multi-source health pill with a per-source breakdown on hover. */
 function sourceDotClass(s: SourceStatus): string {
   if (s.configured === false) return "bg-amber-400";
-  return s.connected ? "bg-emerald-400" : "bg-rose-500";
+  if (isLive(s)) return "bg-emerald-400";
+  if (s.connected) return "bg-amber-400"; // connected but no data flowing (stale)
+  return "bg-rose-500";
 }
 
 function sourceDetail(s: SourceStatus): string {
   if (s.configured === false) return "API key not set";
-  return s.connected ? "Live" : "Disconnected";
+  if (isLive(s)) return "Live";
+  if (s.connected) return "Connected · no data";
+  return "Disconnected";
 }
 
 export function SourcesIndicator({ sources }: { sources: SourceStatus[] }) {
   if (sources.length === 0) return null;
-  const up = sources.filter((s) => s.connected).length;
+  const up = sources.filter(isLive).length;
 
   return (
     <Tooltip>
@@ -58,7 +68,7 @@ export function SourcesIndicator({ sources }: { sources: SourceStatus[] }) {
               className="flex items-center gap-2 rounded-md px-1.5 py-1"
             >
               <span className="relative flex h-2 w-2">
-                {s.connected && (
+                {isLive(s) && (
                   <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
                 )}
                 <span
@@ -69,8 +79,13 @@ export function SourcesIndicator({ sources }: { sources: SourceStatus[] }) {
                 <div className="truncate text-xs">
                   {SOURCE_LABELS[s.name] ?? s.name}
                 </div>
-                {s.configured === false && (
-                  <div className="text-[10px] text-amber-400/90">
+                {!isLive(s) && (
+                  <div
+                    className={cn(
+                      "text-[10px]",
+                      s.connected ? "text-amber-400/90" : "text-rose-400/90",
+                    )}
+                  >
                     {sourceDetail(s)}
                   </div>
                 )}

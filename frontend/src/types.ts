@@ -309,6 +309,8 @@ export type ConnectionStatus = "connecting" | "open" | "closed";
 export interface SourceStatus {
   name: string;
   connected: boolean;
+  /** Connected AND data actually flowing (false = open socket but silent/stale). */
+  receiving?: boolean;
   /** False when required credentials are missing (e.g. AISStream API key). */
   configured?: boolean;
   messages_seen: number;
