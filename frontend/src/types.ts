@@ -311,6 +311,8 @@ export interface SourceStatus {
   connected: boolean;
   /** Connected AND data actually flowing (false = open socket but silent/stale). */
   receiving?: boolean;
+  /** Messages/sec, rolling 5s sample — live throughput for the health readout. */
+  msg_rate?: number;
   /** False when required credentials are missing (e.g. AISStream API key). */
   configured?: boolean;
   messages_seen: number;

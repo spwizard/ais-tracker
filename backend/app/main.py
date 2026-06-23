@@ -19,6 +19,7 @@ import asyncio
 import contextlib
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
@@ -95,6 +96,15 @@ async def _weather_loop(app: FastAPI) -> None:
             except Exception as exc:  # noqa: BLE001
                 log.warning("wave refresh failed: %s", exc)
         await asyncio.sleep(interval)
+
+
+async def _rate_loop(app: FastAPI) -> None:
+    """Refresh each source's messages/sec on a fixed 5s cadence for the health UI."""
+    while True:
+        await asyncio.sleep(5)
+        now = time.time()
+        for src in app.state.sources:
+            src.sample_rate(now)
 
 
 async def _density_loop(app: FastAPI) -> None:
@@ -276,6 +286,7 @@ async def lifespan(app: FastAPI):
     geofence_task = asyncio.create_task(_geofence_loop(app), name="geofence-eval")
     risk_task = asyncio.create_task(_risk_loop(app), name="risk-eval")
     density_task = asyncio.create_task(_density_loop(app), name="density-sample")
+    rate_task = asyncio.create_task(_rate_loop(app), name="source-rate")
     history_task = asyncio.create_task(_history_loop(app), name="history-sample")
     weather_task = (
         asyncio.create_task(_weather_loop(app), name="weather-refresh")
@@ -301,9 +312,12 @@ async def lifespan(app: FastAPI):
         geofence_task.cancel()
         risk_task.cancel()
         density_task.cancel()
+        rate_task.cancel()
         history_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await sweeper
+        with contextlib.suppress(asyncio.CancelledError):
+            await rate_task
         with contextlib.suppress(asyncio.CancelledError):
             await geofence_task
         with contextlib.suppress(asyncio.CancelledError):
@@ -355,6 +369,7 @@ def _source_status(src) -> dict:
         "receiving": src.receiving,  # connected AND data actually flowing
         "configured": src.configured,
         "messages_seen": src.messages_seen,
+        "msg_rate": round(src.msg_rate, 1),  # messages/sec (rolling 5s sample)
     }
 
 

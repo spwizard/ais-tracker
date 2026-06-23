@@ -34,6 +34,16 @@ function sourceDetail(s: SourceStatus): string {
   return "Disconnected";
 }
 
+/** Live throughput, e.g. "118/s". Sub-1 rates round to "<1/s" so a trickle
+ *  still reads as alive; a silent feed reads "0/s". */
+function rateLabel(s: SourceStatus): string {
+  const r = s.msg_rate;
+  if (r == null) return "";
+  if (r === 0) return "0/s";
+  if (r < 1) return "<1/s";
+  return `${Math.round(r)}/s`;
+}
+
 export function SourcesIndicator({ sources }: { sources: SourceStatus[] }) {
   if (sources.length === 0) return null;
   const up = sources.filter(isLive).length;
@@ -90,8 +100,14 @@ export function SourcesIndicator({ sources }: { sources: SourceStatus[] }) {
                   </div>
                 )}
               </div>
-              <span className="tabular-nums text-[11px] text-muted-foreground">
-                {s.messages_seen.toLocaleString()}
+              <span
+                className={cn(
+                  "tabular-nums text-[11px]",
+                  isLive(s) ? "text-foreground/80" : "text-muted-foreground/50",
+                )}
+                title="messages per second"
+              >
+                {rateLabel(s)}
               </span>
             </div>
           ))}

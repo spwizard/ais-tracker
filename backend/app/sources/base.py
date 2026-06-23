@@ -46,11 +46,28 @@ class Source(ABC):
         self.connected = False
         self.messages_seen = 0
         self.last_msg_ts = 0.0  # epoch seconds of the most recent message
+        self.msg_rate = 0.0  # messages/sec, refreshed by sample_rate()
+        self._rate_anchor = 0
+        self._rate_anchor_ts = 0.0
 
     @property
     def receiving(self) -> bool:
         """Connected AND actually delivering data (not a silent/zombie socket)."""
         return self.connected and (time.time() - self.last_msg_ts) < STALE_AFTER_SEC
+
+    def sample_rate(self, now: float) -> None:
+        """Refresh msg_rate from the message delta since the last sample. Called
+        on a fixed cadence so the figure is a true messages/sec, not a lifetime
+        total. Forced to 0 when the feed has gone silent."""
+        if self._rate_anchor_ts:
+            dt = now - self._rate_anchor_ts
+            if dt > 0:
+                rate = (self.messages_seen - self._rate_anchor) / dt
+                self.msg_rate = max(0.0, rate)
+        self._rate_anchor = self.messages_seen
+        self._rate_anchor_ts = now
+        if not self.receiving:
+            self.msg_rate = 0.0
 
     @property
     def configured(self) -> bool:
