@@ -101,11 +101,8 @@ interface MapViewProps {
 }
 
 const INITIAL_VIEW = {
-  // Temporary: open on the Gulf of Finland where the Digitraffic/Kystverket feeds
-  // have live traffic, while AISStream (English Channel coverage) is down.
-  // Revert to longitude -2.5, latitude 50.2 once AISStream is back.
-  longitude: 25.0,
-  latitude: 59.8,
+  longitude: -2.5,
+  latitude: 50.2,
   zoom: 7,
   pitch: 0,
   bearing: 0,
