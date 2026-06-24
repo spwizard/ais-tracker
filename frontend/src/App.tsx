@@ -124,31 +124,52 @@ export default function App() {
   const replay = useReplay(replayMode ? replayWindow : null);
   const replayAlerts = useReplayAlerts(replayMode ? replayWindow : null);
 
-  // Slider range = requested window clamped to the store's actual data span, so
-  // the scrubber doesn't cover empty time. `span` is the whole store's min/max
-  // (not per-bbox), so it's stable across pan/zoom — only drifting by seconds.
+  // The time span actually covered by the tracks IN VIEW — not the whole store's
+  // span. This matters when the viewed area has less history than the store (e.g.
+  // after a feed outage the English Channel only has the last N hours, while the
+  // Baltic span is 48h): the scrubber and start point track the visible data, so
+  // replay never opens parked in an empty stretch of time. Tracks are oldest-first
+  // per path, so min/max are the path endpoints — O(tracks), not O(points).
+  const replayDataSpan = useMemo<[number, number] | null>(() => {
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (const t of replay.tracks) {
+      const p = t.path;
+      if (p.length) {
+        lo = Math.min(lo, p[0][2]);
+        hi = Math.max(hi, p[p.length - 1][2]);
+      }
+    }
+    return lo <= hi ? [lo, hi] : null;
+  }, [replay.tracks]);
+
+  // Slider range = requested window, clamped to the in-view data span (falling
+  // back to the store span, then the raw window) so the scrubber doesn't cover
+  // empty time.
   const replayRange = useMemo(() => {
     if (!replayWindow) return null;
+    const span = replayDataSpan ?? replay.span;
     let { start, end } = replayWindow;
-    if (replay.span) {
-      start = Math.max(start, replay.span[0]);
-      end = Math.min(end, replay.span[1]);
+    if (span) {
+      start = Math.max(start, span[0]);
+      end = Math.min(end, span[1]);
     }
     return end > start ? { start, end } : { start: replayWindow.start, end: replayWindow.end };
-  }, [replayWindow, replay.span]);
+  }, [replayWindow, replayDataSpan, replay.span]);
 
-  // Position the clock at the data start ONCE per replay session, after the first
-  // fetch lands — not on every refetch (which would jolt the playhead on pan).
+  // Position the clock at the in-view data start ONCE per replay session, after
+  // the first fetch lands — not on every refetch (which would jolt on pan).
   const replaySeekedRef = useRef(false);
   useEffect(() => {
     if (!replayMode) replaySeekedRef.current = false;
   }, [replayMode]);
   useEffect(() => {
-    if (replayMode && !replaySeekedRef.current && replay.span) {
+    const span = replayDataSpan ?? replay.span;
+    if (replayMode && !replaySeekedRef.current && span) {
       replaySeekedRef.current = true;
-      mapRef.current?.seek(replay.span[0]);
+      mapRef.current?.seek(span[0]);
     }
-  }, [replayMode, replay.span]);
+  }, [replayMode, replayDataSpan, replay.span]);
 
   // Tracks follow the map: update only the bbox (keep the time window + scrub
   // position). Ignore sub-threshold changes so we don't refetch on tiny nudges.
