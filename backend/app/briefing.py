@@ -48,6 +48,32 @@ class OpenSourceList(BaseModel):
     findings: List[OpenSourceFinding]
 
 
+def ground_findings(findings: list[dict], results: list[dict], vessel) -> tuple[list[dict], int]:
+    """Keep only findings with a trustworthy citation. The `source_url` must be one
+    of the actual search-result URLs (not invented, nor a link lifted from inside
+    another page's text), and that result must actually reference *this* vessel —
+    by IMO, or by name — so a finding can't cite a different vessel's page. Returns
+    (kept, dropped_count). This is the deterministic guard behind the model's
+    'never invent a url' instruction, which small models don't always honour."""
+    by_url = {r.get("url"): r for r in results if r.get("url")}
+    imo = str(vessel.imo) if getattr(vessel, "imo", None) else None
+    name = (getattr(vessel, "name", None) or "").lower().strip()
+    kept: list[dict] = []
+    dropped = 0
+    for f in findings:
+        r = by_url.get(f.get("source_url"))
+        if r is None:
+            dropped += 1  # url isn't one of the real results
+            continue
+        hay = f"{r.get('title', '')} {r.get('content', '')}".lower()
+        refs_subject = (imo is not None and imo in hay) or (len(name) >= 4 and name in hay)
+        if not refs_subject:
+            dropped += 1  # cited result doesn't actually mention this vessel
+            continue
+        kept.append(f)
+    return kept, dropped
+
+
 class Briefing(BaseModel):
     risk_level: Severity
     summary: str
@@ -394,6 +420,9 @@ class BriefingService:
                 log.warning("web synthesis (gemini) failed (continuing): %s", exc)
                 return {**self._EMPTY_WEB, "sources": sources, "searches": 1}
             open_source = [f.model_dump() for f in out.findings] if out else []
+            open_source, dropped = ground_findings(open_source, results, vessel)
+            if dropped:
+                log.info("dropped %d ungrounded open-source finding(s) for %s", dropped, vessel.mmsi)
             return {
                 "open_source": open_source,
                 "sources": sources,
@@ -417,13 +446,15 @@ class BriefingService:
 
         out = resp.parsed_output
         open_source = [f.model_dump() for f in out.findings] if out else []
+        open_source, dropped = ground_findings(open_source, results, vessel)
         u = resp.usage
         tokens = (getattr(u, "input_tokens", 0) or 0) + (getattr(u, "output_tokens", 0) or 0)
         log.info(
-            "web research for %s: %d sources → %d findings (Tavily + %s)",
+            "web research for %s: %d sources → %d findings (%d dropped, Tavily + %s)",
             vessel.mmsi,
             len(sources),
             len(open_source),
+            dropped,
             self._search_model,
         )
         return {

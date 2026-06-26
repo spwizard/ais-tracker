@@ -67,15 +67,34 @@ class SanctionsStore:
     def screen_vessel(
         self, imo=None, mmsi=None, name=None, callsign=None, by_name: bool = True
     ) -> dict | None:
-        """Strong identifiers first; name is the weakest (set by_name=False to skip)."""
+        """Match a live vessel against the SDN list, strongest identifier first.
+
+        IMO is the permanent hull number and authoritative. MMSI, call sign and
+        name are all *reassignable* — an MMSI follows the radio/registration and
+        gets handed to a different ship when the old one is reflagged or scrapped.
+        So a weaker-identifier match is rejected when the matched SDN record has an
+        IMO that differs from the queried IMO: same MMSI + different IMO means a
+        different hull (e.g. a sanctioned vessel's old MMSI now on a clean ship),
+        not a sanctions hit."""
         if imo and imo in self._by_imo:
             return self._by_imo[imo]
+
+        def _imo_conflict(rec: dict) -> bool:
+            # True when both sides have IMOs and they differ → not the same hull.
+            return bool(imo) and bool(rec.get("imo")) and rec["imo"] != imo
+
         if mmsi and mmsi in self._by_mmsi:
-            return self._by_mmsi[mmsi]
+            rec = self._by_mmsi[mmsi]
+            if not _imo_conflict(rec):
+                return rec
         if callsign and callsign.upper() in self._by_callsign:
-            return self._by_callsign[callsign.upper()]
+            rec = self._by_callsign[callsign.upper()]
+            if not _imo_conflict(rec):
+                return rec
         if by_name and name and _norm(name) in self._vessel_names:
-            return self._vessel_names[_norm(name)]
+            rec = self._vessel_names[_norm(name)]
+            if not _imo_conflict(rec):
+                return rec
         return None
 
     def screen_entity(self, name: str | None) -> bool:
