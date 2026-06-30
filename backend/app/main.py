@@ -22,7 +22,8 @@ import os
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+import httpx
+from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
@@ -56,6 +57,14 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
 )
 log = logging.getLogger("main")
+
+# Shared pooled client for the Google 3D Tiles proxy (high request volume).
+_http = httpx.AsyncClient(
+    timeout=httpx.Timeout(20.0),
+    limits=httpx.Limits(max_connections=64, max_keepalive_connections=16),
+)
+
+GOOGLE_3D_HOST = "https://tile.googleapis.com"
 
 
 async def _stale_sweeper(app: FastAPI) -> None:
@@ -347,6 +356,7 @@ async def lifespan(app: FastAPI):
         ownership.close()
         await broadcaster.stop()
         await store.close()
+        await _http.aclose()
 
 
 app = FastAPI(title="AIS Tracker API", version="1.0.0", lifespan=lifespan)
@@ -393,7 +403,46 @@ async def healthz():
 
 @app.get("/api/flags")
 async def feature_flags():
-    return {"flags": get_flags()}
+    flags = get_flags()
+    # Photoreal 3D available only when a Google key is configured server-side.
+    flags["google_3d"] = bool(app.state.settings.google_maps_key)
+    return {"flags": flags}
+
+
+# Hop-by-hop and key-bearing headers we must not echo back to the browser.
+_TILE_DROP_HEADERS = {
+    "content-encoding", "content-length", "transfer-encoding", "connection",
+    "x-goog-api-key", "set-cookie", "alt-svc",
+}
+
+
+@app.get("/v1/3dtiles/{path:path}")
+async def google_3d_proxy(path: str, request: Request):
+    """Proxy Google Photorealistic 3D Tiles, injecting the API key server-side so
+    it's never exposed to the browser. Child tile URIs are host-relative
+    (/v1/3dtiles/...), so they resolve back through this same route. The key must
+    go in the X-GOOG-API-KEY header (query-param keys are rejected by Google)."""
+    key = app.state.settings.google_maps_key
+    if not key:
+        raise HTTPException(404, "3D tiles not configured")
+    try:
+        upstream = await _http.get(
+            f"{GOOGLE_3D_HOST}/v1/3dtiles/{path}",
+            params=dict(request.query_params),
+            headers={"X-GOOG-API-KEY": key},
+        )
+    except httpx.HTTPError as exc:
+        log.warning("3d-tiles proxy upstream error: %s", exc)
+        raise HTTPException(502, "upstream tile error")
+    headers = {
+        k: v for k, v in upstream.headers.items() if k.lower() not in _TILE_DROP_HEADERS
+    }
+    return Response(
+        content=upstream.content,
+        status_code=upstream.status_code,
+        media_type=upstream.headers.get("content-type"),
+        headers=headers,
+    )
 
 
 @app.get("/api/sources")

@@ -75,6 +75,7 @@ export default function App() {
   const [forecastStep, setForecastStep] = useState(0); // GFS forecast hour, 0 = now
   const [is3D, setIs3D] = useState(false);
   const [cinematic, setCinematic] = useState(false);
+  const google3d = useFlag("google_3d"); // backend proxy can serve photoreal tiles
   const [selectedMmsi, setSelectedMmsi] = useState<number | null>(null);
   const [networkMmsi, setNetworkMmsi] = useState<number | null>(null);
 
@@ -588,6 +589,7 @@ export default function App() {
         onDrawComplete={handleDrawComplete}
         onDrawCancel={() => setDrawMode(null)}
         cinematic={cinematic}
+        google3d={google3d}
       />
 
       {/* Floating UI — pointer-events re-enabled per element. */}

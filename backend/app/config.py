@@ -102,6 +102,9 @@ class Settings(BaseSettings):
     density_bucket_sec: int = Field(default=3600, alias="DENSITY_BUCKET_SEC")  # 1h buckets
     density_sample_sec: float = Field(default=60.0, alias="DENSITY_SAMPLE_SEC")
 
+    # --- Google Photorealistic 3D Tiles (proxied so the key stays server-side) -
+    google_maps_key: str = Field(default="", alias="GOOGLE_MAPS_KEY")
+
     # --- Vessel-movement replay (historical position track store) ----------
     history_path: str = Field(default="data/positions.sqlite", alias="HISTORY_PATH")
     history_window_sec: int = Field(default=172800, alias="HISTORY_WINDOW_SEC")  # 48h

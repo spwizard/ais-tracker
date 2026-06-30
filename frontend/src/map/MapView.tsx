@@ -26,7 +26,7 @@ import type { CompiledFence } from "@/geofence/geometry";
 import type { FenceShape } from "@/geofence/types";
 
 import { CINEMATIC_STYLE } from "./cinematicStyle";
-import { hasGoogle3D, EMPTY_DARK_STYLE, buildGoogle3DLayer } from "./google3d";
+import { EMPTY_DARK_STYLE, buildGoogle3DLayer } from "./google3d";
 
 const DARK_STYLE =
   import.meta.env.VITE_MAP_STYLE ??
@@ -105,6 +105,8 @@ interface MapViewProps {
   onDrawCancel: () => void;
   // Cinematic coastal mode: satellite imagery + 3D terrain + high tilt.
   cinematic: boolean;
+  // True when the backend proxy can serve Google Photorealistic 3D Tiles.
+  google3d: boolean;
 }
 
 const INITIAL_VIEW = {
@@ -161,6 +163,7 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
     onDrawComplete,
     onDrawCancel,
     cinematic,
+    google3d,
   } = props;
 
   const drawing = drawMode != null;
@@ -381,7 +384,7 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
         // Lift 3D models onto Google's photoreal water (at mean sea level, ~geoid
         // height above the ellipsoid) only when that mesh is the world; otherwise
         // sea level is the ellipsoid (z=0). ~48 m suits NW Europe / the Channel.
-        modelElevation: cinematic && hasGoogle3D ? 48 : 0,
+        modelElevation: cinematic && google3d ? 48 : 0,
         densityMode,
         drawing,
         showTrails,
@@ -421,6 +424,7 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
       version,
       zoom,
       cinematic,
+      google3d,
       densityMode,
       drawing,
       showTrails,
@@ -456,8 +460,8 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
   // cinematic mode (when a key is configured). Rendered beneath everything else.
   const [googleAttribution, setGoogleAttribution] = useState("");
   const googleLayer = useMemo(
-    () => (cinematic && hasGoogle3D ? buildGoogle3DLayer(setGoogleAttribution) : null),
-    [cinematic],
+    () => (cinematic && google3d ? buildGoogle3DLayer(setGoogleAttribution) : null),
+    [cinematic, google3d],
   );
   // Over Google's photoreal mesh, draw the flat 2D overlays (icons, trails,
   // rings) with depth-testing off so they always float on top instead of being
@@ -536,7 +540,7 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
         reuseMaps
         mapStyle={
           cinematic
-            ? hasGoogle3D
+            ? google3d
               ? EMPTY_DARK_STYLE // Google's photoreal mesh is the world
               : CINEMATIC_STYLE
             : theme === "dark"
@@ -548,7 +552,7 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
       />
       </DeckGL>
       {/* Google requires its (dynamic) data attribution be shown over the tiles. */}
-      {cinematic && hasGoogle3D && googleAttribution && (
+      {cinematic && google3d && googleAttribution && (
         <div className="pointer-events-none absolute bottom-1 left-2 z-10 text-[10px] text-white/70 [text-shadow:0_1px_2px_rgba(0,0,0,0.8)]">
           {googleAttribution}
         </div>
