@@ -1,4 +1,4 @@
-import { Layers, Route, Navigation, Flame, Wind, Waves, History, Loader2 } from "lucide-react";
+import { Layers, Route, Navigation, Flame, Wind, Waves, History, Loader2, Mountain } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -21,6 +21,8 @@ interface LayerControlsProps {
   onToggleReplay: (v: boolean) => void;
   replayAvailable: boolean;
   replayLoading: boolean;
+  cinematic: boolean;
+  onToggleCinematic: (v: boolean) => void;
   onJump: (target: ViewTarget) => void;
 }
 
@@ -52,6 +54,8 @@ export function LayerControls({
   onToggleReplay,
   replayAvailable,
   replayLoading,
+  cinematic,
+  onToggleCinematic,
   onJump,
 }: LayerControlsProps) {
   return (
@@ -95,6 +99,18 @@ export function LayerControls({
             <Switch checked={showWaves} onCheckedChange={onToggleWaves} />
           </label>
         )}
+
+        <Separator />
+        <label className="flex cursor-pointer items-center justify-between rounded-md px-1 py-1">
+          <span className="flex items-center gap-2 text-sm">
+            <Mountain className="h-4 w-4 text-muted-foreground" />
+            Cinematic coast (3D)
+          </span>
+          <Switch checked={cinematic} onCheckedChange={onToggleCinematic} />
+        </label>
+        <p className="px-1 text-[10px] leading-snug text-muted-foreground/60">
+          Photoreal 3D terrain + buildings, tilted to the horizon.
+        </p>
 
         {replayAvailable && (
           <>

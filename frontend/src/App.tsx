@@ -74,6 +74,7 @@ export default function App() {
   const [showWaves, setShowWaves] = useState(false);
   const [forecastStep, setForecastStep] = useState(0); // GFS forecast hour, 0 = now
   const [is3D, setIs3D] = useState(false);
+  const [cinematic, setCinematic] = useState(false);
   const [selectedMmsi, setSelectedMmsi] = useState<number | null>(null);
   const [networkMmsi, setNetworkMmsi] = useState<number | null>(null);
 
@@ -586,6 +587,7 @@ export default function App() {
         drawColor={categoryColor(drawCategory)}
         onDrawComplete={handleDrawComplete}
         onDrawCancel={() => setDrawMode(null)}
+        cinematic={cinematic}
       />
 
       {/* Floating UI — pointer-events re-enabled per element. */}
@@ -674,6 +676,12 @@ export default function App() {
             onToggleReplay={toggleReplay}
             replayAvailable={replayAvailable}
             replayLoading={replay.loading}
+            cinematic={cinematic}
+            onToggleCinematic={(on) => {
+              setCinematic(on);
+              setIs3D(on);
+              mapRef.current?.setCinematic(on);
+            }}
             onJump={handleJump}
           />
         )}

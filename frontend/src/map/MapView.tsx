@@ -25,6 +25,9 @@ import { useGeofenceDraw, type DrawResult } from "@/hooks/useGeofenceDraw";
 import type { CompiledFence } from "@/geofence/geometry";
 import type { FenceShape } from "@/geofence/types";
 
+import { CINEMATIC_STYLE } from "./cinematicStyle";
+import { hasGoogle3D, EMPTY_DARK_STYLE, buildGoogle3DLayer } from "./google3d";
+
 const DARK_STYLE =
   import.meta.env.VITE_MAP_STYLE ??
   "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
@@ -45,6 +48,8 @@ export interface MapHandle {
   fit: () => void;
   fitBounds: (points: [number, number][]) => void;
   set3D: (on: boolean) => void;
+  /** Enter/leave cinematic coastal view (fly to a dramatic coast + high tilt). */
+  setCinematic: (on: boolean) => void;
   pitchBy: (delta: number) => void;
   /** Jump the replay clock to an absolute time (epoch seconds). */
   seek: (t: number) => void;
@@ -98,6 +103,8 @@ interface MapViewProps {
   drawColor: string;
   onDrawComplete: (r: DrawResult) => void;
   onDrawCancel: () => void;
+  // Cinematic coastal mode: satellite imagery + 3D terrain + high tilt.
+  cinematic: boolean;
 }
 
 const INITIAL_VIEW = {
@@ -153,6 +160,7 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
     drawColor,
     onDrawComplete,
     onDrawCancel,
+    cinematic,
   } = props;
 
   const drawing = drawMode != null;
@@ -265,6 +273,15 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
         transitionDuration: 600,
         transitionInterpolator: new LinearInterpolator(["pitch"]),
       })),
+    setCinematic: (on) =>
+      // Tilt in place — stay where the user is looking; just lean toward the
+      // horizon for the cinematic view (or level back out when leaving it).
+      setViewState((prev) => ({
+        ...prev,
+        pitch: on ? 60 : 0,
+        transitionDuration: 700,
+        transitionInterpolator: new LinearInterpolator(["pitch"]),
+      })),
     pitchBy: (delta) =>
       setViewState((prev) => ({
         ...prev,
@@ -361,6 +378,10 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
         data: vessels,
         version,
         zoom,
+        // Lift 3D models onto Google's photoreal water (at mean sea level, ~geoid
+        // height above the ellipsoid) only when that mesh is the world; otherwise
+        // sea level is the ellipsoid (z=0). ~48 m suits NW Europe / the Channel.
+        modelElevation: cinematic && hasGoogle3D ? 48 : 0,
         densityMode,
         drawing,
         showTrails,
@@ -399,6 +420,7 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
       vessels,
       version,
       zoom,
+      cinematic,
       densityMode,
       drawing,
       showTrails,
@@ -430,6 +452,28 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
     ],
   );
 
+  // Google Photorealistic 3D Tiles — the photoreal mesh that becomes the world in
+  // cinematic mode (when a key is configured). Rendered beneath everything else.
+  const [googleAttribution, setGoogleAttribution] = useState("");
+  const googleLayer = useMemo(
+    () => (cinematic && hasGoogle3D ? buildGoogle3DLayer(setGoogleAttribution) : null),
+    [cinematic],
+  );
+  // Over Google's photoreal mesh, draw the flat 2D overlays (icons, trails,
+  // rings) with depth-testing off so they always float on top instead of being
+  // buried in the 3D geometry as you zoom in. The mesh and the 3D vessel models
+  // KEEP depth: the mesh self-occludes, and the ScenegraphLayer models need depth
+  // for their own geometry (without it the hull renders inside-out / "tipped").
+  const allLayers = useMemo(() => {
+    if (!googleLayer) return layers;
+    const over = layers.map((l) => {
+      const L = l as { id?: string; clone?: (p: object) => unknown; props?: { parameters?: object } };
+      if (!L?.clone || (typeof L.id === "string" && L.id.startsWith("vessel-models"))) return l;
+      return L.clone({ parameters: { ...(L.props?.parameters ?? {}), depthCompare: "always" } });
+    });
+    return [googleLayer, ...over];
+  }, [googleLayer, layers]);
+
   // Sky/atmosphere gradient fades in with pitch to hide the bare horizon line
   // of a 2D basemap when tilted toward the horizon.
   const pitch = (viewState.pitch as number) ?? 0;
@@ -442,7 +486,7 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
   return (
     <>
       <DeckGL
-      layers={layers as never}
+      layers={allLayers as never}
       viewState={viewState as never}
       onViewStateChange={(e: { viewState: Record<string, unknown> }) =>
         setViewState(e.viewState)
@@ -490,11 +534,25 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
     >
       <Map
         reuseMaps
-        mapStyle={theme === "dark" ? DARK_STYLE : LIGHT_STYLE}
+        mapStyle={
+          cinematic
+            ? hasGoogle3D
+              ? EMPTY_DARK_STYLE // Google's photoreal mesh is the world
+              : CINEMATIC_STYLE
+            : theme === "dark"
+              ? DARK_STYLE
+              : LIGHT_STYLE
+        }
         attributionControl={false}
-        maxPitch={79}
+        maxPitch={85}
       />
       </DeckGL>
+      {/* Google requires its (dynamic) data attribution be shown over the tiles. */}
+      {cinematic && hasGoogle3D && googleAttribution && (
+        <div className="pointer-events-none absolute bottom-1 left-2 z-10 text-[10px] text-white/70 [text-shadow:0_1px_2px_rgba(0,0,0,0.8)]">
+          {googleAttribution}
+        </div>
+      )}
       {/* Cinematic dimming in replay: knock the basemap + labels back and add a
           vignette so the neon routes read as the foreground. Only the MapLibre
           canvas is filtered — deck's data canvas stays at full brightness. */}

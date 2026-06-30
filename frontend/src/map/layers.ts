@@ -98,6 +98,10 @@ export interface LayerOptions {
   showTrails: boolean;
   trailWindowSec: number; // how far back trails fade
   currentTime: number; // epoch seconds, animated for TripsLayer + motion
+  // Metres to lift 3D models above the WGS84 ellipsoid so they sit on the local
+  // sea surface (mean sea level). 0 normally; ~geoid height in cinematic mode,
+  // where Google's photoreal water is at MSL, not the ellipsoid.
+  modelElevation: number;
   selectedMmsi: number | null;
   onClick: (v: TrackedVessel | null) => void;
   // Bold highlighted track for the selected vessel ("show on map").
@@ -137,6 +141,7 @@ export function buildLayers(opts: LayerOptions) {
     showTrails,
     trailWindowSec,
     currentTime,
+    modelElevation,
     selectedMmsi,
     onClick,
     highlightTrack,
@@ -517,12 +522,16 @@ export function buildLayers(opts: LayerOptions) {
           sizeScale: MODEL_SIZE_SCALE,
           sizeMinPixels: MODEL_MIN_PX,
           sizeMaxPixels: MODEL_MAX_PX,
-          getPosition: (d) =>
-            deadReckon(d.lat as number, d.lon as number, d.cog, d.sog, currentTime - d.ts),
+          getPosition: (d) => {
+            const [lon, lat] = deadReckon(
+              d.lat as number, d.lon as number, d.cog, d.sog, currentTime - d.ts,
+            );
+            return [lon, lat, modelElevation];
+          },
           getOrientation: (d) => [0, -facingAngle(d) + model.yawOffset, 90],
           onClick: (info) => onClick((info.object as TrackedVessel) ?? null),
           updateTriggers: {
-            getPosition: currentTime,
+            getPosition: [currentTime, modelElevation],
             getOrientation: [version, currentTime],
           },
         }),
