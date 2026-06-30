@@ -385,6 +385,7 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
         // height above the ellipsoid) only when that mesh is the world; otherwise
         // sea level is the ellipsoid (z=0). ~48 m suits NW Europe / the Channel.
         modelElevation: cinematic && google3d ? 48 : 0,
+        cullBounds: boundsFromViewState(viewState),
         densityMode,
         drawing,
         showTrails,
@@ -516,24 +517,43 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
         // Click on empty water (no vessel, no fence) clears the vessel selection.
         if (!info.object) onSelect(null);
       }}
-      onHover={(info) => {
-        if (drawing)
-          draw.onMapHover(
-            info.coordinate ? [info.coordinate[0], info.coordinate[1]] : null,
-          );
-      }}
-      onDragStart={(info) => {
-        if (drawing && info.coordinate)
-          draw.onMapDragStart([info.coordinate[0], info.coordinate[1]]);
-      }}
-      onDrag={(info) => {
-        if (drawing && info.coordinate)
-          draw.onMapDrag([info.coordinate[0], info.coordinate[1]]);
-      }}
-      onDragEnd={(info) => {
-        if (drawing && info.coordinate)
-          draw.onMapDragEnd([info.coordinate[0], info.coordinate[1]]);
-      }}
+      // Attach drag/hover handlers ONLY while drawing a geofence. When they're
+      // present, deck runs a picking pass on every drag-move to populate the
+      // callback info — and picking the 3D ScenegraphLayer models (which appear
+      // at zoom ≥ 11.5) is heavy enough to stall the controller's pan, so the map
+      // gets "stuck" once you zoom in. Omitting them lets normal pan stay pick-free.
+      onHover={
+        drawing
+          ? (info) =>
+              draw.onMapHover(
+                info.coordinate ? [info.coordinate[0], info.coordinate[1]] : null,
+              )
+          : undefined
+      }
+      onDragStart={
+        drawing
+          ? (info) => {
+              if (info.coordinate)
+                draw.onMapDragStart([info.coordinate[0], info.coordinate[1]]);
+            }
+          : undefined
+      }
+      onDrag={
+        drawing
+          ? (info) => {
+              if (info.coordinate)
+                draw.onMapDrag([info.coordinate[0], info.coordinate[1]]);
+            }
+          : undefined
+      }
+      onDragEnd={
+        drawing
+          ? (info) => {
+              if (info.coordinate)
+                draw.onMapDragEnd([info.coordinate[0], info.coordinate[1]]);
+            }
+          : undefined
+      }
       style={{ position: "absolute", inset: "0" }}
     >
       <Map

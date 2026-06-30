@@ -28,6 +28,10 @@ const MODEL_MIN_ZOOM = 11.5; // below this, the flat icon is used
 const MODEL_SIZE_SCALE = 110;
 const MODEL_MIN_PX = 24;
 const MODEL_MAX_PX = 72;
+// Hard ceiling on simultaneously-rendered 3D models (across all groups). Each is
+// a full GLTF mesh; beyond a few hundred the frame rate tanks. Vessels past this
+// fall back to their flat icon, so nothing disappears — it just isn't 3D.
+const MODEL_MAX_INSTANCES = 300;
 
 /**
  * The compass angle a vessel should face. While making way, face the direction
@@ -102,6 +106,10 @@ export interface LayerOptions {
   // sea surface (mean sea level). 0 normally; ~geoid height in cinematic mode,
   // where Google's photoreal water is at MSL, not the ellipsoid.
   modelElevation: number;
+  // Current viewport bounds [west, south, east, north]. The 3D model layer is
+  // culled to this (a detailed GLTF mesh per vessel is far too heavy to render
+  // for the whole fleet), so only on-screen ships get models.
+  cullBounds: [number, number, number, number] | null;
   selectedMmsi: number | null;
   onClick: (v: TrackedVessel | null) => void;
   // Bold highlighted track for the selected vessel ("show on map").
@@ -127,6 +135,42 @@ export interface LayerOptions {
 }
 
 /**
+ * Pick the vessels to draw as 3D models this frame: those in a model group,
+ * within the (padded) viewport, capped to the MODEL_MAX_INSTANCES nearest the
+ * centre. A full GLTF mesh per vessel is far too heavy to render for the whole
+ * fleet, so without this the frame rate collapses the moment models switch on.
+ */
+function selectModelShips(
+  data: TrackedVessel[],
+  cullBounds: [number, number, number, number] | null,
+): TrackedVessel[] {
+  let inView = data.filter(
+    (d) =>
+      d.lat != null && d.lon != null && MODEL_GROUPS.has(groupKeyFor(d.ship_type)),
+  );
+  if (cullBounds) {
+    const [w, s, e, n] = cullBounds;
+    const padX = (e - w) * 0.25;
+    const padY = (n - s) * 0.25;
+    inView = inView.filter(
+      (d) =>
+        (d.lon as number) >= w - padX &&
+        (d.lon as number) <= e + padX &&
+        (d.lat as number) >= s - padY &&
+        (d.lat as number) <= n + padY,
+    );
+  }
+  if (inView.length > MODEL_MAX_INSTANCES) {
+    const cx = cullBounds ? (cullBounds[0] + cullBounds[2]) / 2 : 0;
+    const cy = cullBounds ? (cullBounds[1] + cullBounds[3]) / 2 : 0;
+    const dist2 = (d: TrackedVessel) =>
+      ((d.lon as number) - cx) ** 2 + ((d.lat as number) - cy) ** 2;
+    inView = [...inView].sort((a, b) => dist2(a) - dist2(b)).slice(0, MODEL_MAX_INSTANCES);
+  }
+  return inView;
+}
+
+/**
  * Build the deck.gl layer stack. Returning fresh layer instances each render is
  * the idiomatic deck.gl pattern; `updateTriggers` keyed on `version` tells deck
  * to re-read the accessors only when the underlying data actually changed.
@@ -142,6 +186,7 @@ export function buildLayers(opts: LayerOptions) {
     trailWindowSec,
     currentTime,
     modelElevation,
+    cullBounds,
     selectedMmsi,
     onClick,
     highlightTrack,
@@ -231,6 +276,13 @@ export function buildLayers(opts: LayerOptions) {
   const modelsActive = !densityMode && !history && zoom >= MODEL_MIN_ZOOM;
   const isModelVessel = (d: TrackedVessel) =>
     modelsActive && MODEL_GROUPS.has(groupKeyFor(d.ship_type));
+
+  // Vessels actually drawn as 3D models this frame — culled to the (padded)
+  // viewport and capped to the nearest MODEL_MAX_INSTANCES. Computed once so the
+  // flat-icon layer below can fall back to icons for any model-group vessel that
+  // didn't make the cut (off-screen or over the cap), instead of it vanishing.
+  const modelShips = modelsActive ? selectModelShips(data, cullBounds) : [];
+  const modelMmsis = new Set<number>(modelShips.map((d) => d.mmsi));
 
   // Density heatmap — live fleet, or a historical bucket when scrubbing.
   if (heatOpacity > 0.01) {
@@ -384,10 +436,11 @@ export function buildLayers(opts: LayerOptions) {
     }
   }
 
-  // When 3D models are active, drop modelled vessels from the flat-icon layer
-  // so the model isn't competing with an icon at the same spot.
+  // When 3D models are active, drop only the vessels that actually got a model
+  // from the flat-icon layer (so the model isn't competing with an icon). Ships
+  // in a model group that were culled/capped still render as icons.
   const iconData = modelsActive
-    ? data.filter((d) => !MODEL_GROUPS.has(groupKeyFor(d.ship_type)))
+    ? data.filter((d) => !modelMmsis.has(d.mmsi))
     : data;
 
   // Cyan "the analyst is pointing here" rings — a steady ring that breathes
@@ -503,13 +556,12 @@ export function buildLayers(opts: LayerOptions) {
   );
 
   // 3D models when zoomed in — one shared, GPU-instanced layer per ship group.
+  // `modelShips` is already culled to the viewport and capped (computed up front
+  // so the flat-icon layer can show whatever didn't get a model).
   if (modelsActive) {
     for (const [group, model] of Object.entries(MODEL_REGISTRY)) {
       if (!model) continue;
-      const ships = data.filter(
-        (d) =>
-          d.lat != null && d.lon != null && groupKeyFor(d.ship_type) === group,
-      );
+      const ships = modelShips.filter((d) => groupKeyFor(d.ship_type) === group);
       if (ships.length === 0) continue;
       layers.push(
         new ScenegraphLayer<TrackedVessel>({
