@@ -416,6 +416,20 @@ _TILE_DROP_HEADERS = {
 }
 
 
+def _origin_host_allowed(referer: str, host: str) -> bool:
+    """Basic anti-hotlink guard: the request's Referer/Origin must come from our
+    own host (so the proxy isn't an open relay billed to us from other sites).
+    localhost is always allowed for dev (frontend :5174 → backend :8000). Browsers
+    send a same-origin Referer by default; a missing one (e.g. curl) is rejected.
+    Not bulletproof (referers are spoofable) but stops casual abuse/hotlinking."""
+    from urllib.parse import urlparse
+
+    ref_host = (urlparse(referer).hostname or "").lower() if referer else ""
+    if not ref_host:
+        return False
+    return ref_host == host or ref_host in ("localhost", "127.0.0.1")
+
+
 @app.get("/v1/3dtiles/{path:path}")
 async def google_3d_proxy(path: str, request: Request):
     """Proxy Google Photorealistic 3D Tiles, injecting the API key server-side so
@@ -425,6 +439,10 @@ async def google_3d_proxy(path: str, request: Request):
     key = app.state.settings.google_maps_key
     if not key:
         raise HTTPException(404, "3D tiles not configured")
+    req_host = (request.headers.get("host") or "").split(":")[0].lower()
+    referer = request.headers.get("referer") or request.headers.get("origin") or ""
+    if not _origin_host_allowed(referer, req_host):
+        raise HTTPException(403, "forbidden origin")
     try:
         upstream = await _http.get(
             f"{GOOGLE_3D_HOST}/v1/3dtiles/{path}",
