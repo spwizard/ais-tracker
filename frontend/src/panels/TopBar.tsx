@@ -1,5 +1,6 @@
 import {
   Ship,
+  Eye,
   Radio,
   Loader2,
   WifiOff,
@@ -89,11 +90,14 @@ export function TopBar({
       {/* Brand */}
       <div className="flex items-center gap-2 pl-1">
         <div className="grid h-7 w-7 place-items-center rounded-lg bg-primary/15 text-primary">
-          <Ship className="h-4 w-4" />
+          <Eye className="h-4 w-4" />
         </div>
         <div className="hidden leading-tight sm:block">
           <div className="text-sm font-semibold tracking-tight">
-            Maritime<span className="text-primary">·</span>Live
+            Argus<span className="text-primary">·</span>Eyes
+          </div>
+          <div className="whitespace-nowrap text-[9px] font-medium uppercase tracking-[0.15em] text-muted-foreground/70">
+            land · air · sea
           </div>
         </div>
       </div>

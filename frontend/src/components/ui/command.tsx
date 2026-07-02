@@ -32,7 +32,7 @@ export function CommandDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="overflow-hidden p-0">
         <DialogTitle className="sr-only">{label}</DialogTitle>
-        <DialogDescription className="sr-only">Global maritime search</DialogDescription>
+        <DialogDescription className="sr-only">Global search</DialogDescription>
         <Command
           shouldFilter={false}
           className="glass border border-border/60 shadow-2xl [&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider [&_[cmdk-group-heading]]:text-muted-foreground"
