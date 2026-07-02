@@ -15,9 +15,19 @@ import {
   WebMercatorViewport,
 } from "@deck.gl/core";
 import { Map } from "react-map-gl/maplibre";
-import type { TrackedVessel, DensityPoint, WeatherMeta, ReplayTrack, Alert } from "@/types";
+import type {
+  TrackedVessel,
+  TrackedAircraft,
+  Camera,
+  DensityPoint,
+  WeatherMeta,
+  ReplayTrack,
+  Alert,
+} from "@/types";
 import { NAV_STATUS, colorHexFor } from "@/lib/shipTypes";
 import { buildLayers } from "./layers";
+import { buildAircraftLayers, buildRouteLayers, type AirRoute } from "./aircraftLayers";
+import { buildCameraLayers } from "./cameraLayers";
 import { buildReplayLayers, type TrailMode, type ColorMode } from "./replayLayers";
 import { advanceClock } from "./replayMath";
 import { buildFenceLayers, buildDraftLayers } from "./geofenceLayers";
@@ -107,6 +117,17 @@ interface MapViewProps {
   cinematic: boolean;
   // True when the backend proxy can serve Google Photorealistic 3D Tiles.
   google3d: boolean;
+  // Air-traffic (ADS-B) layer.
+  aircraft: TrackedAircraft[];
+  showAir: boolean;
+  onSelectAircraft: (a: TrackedAircraft | null) => void;
+  selectedHex: string | null;
+  airRoute: AirRoute | null;
+  // London traffic cameras (land) layer.
+  cameras: Camera[];
+  showCameras: boolean;
+  onSelectCamera: (c: Camera | null) => void;
+  selectedCameraId: string | null;
 }
 
 const INITIAL_VIEW = {
@@ -164,6 +185,15 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
     onDrawCancel,
     cinematic,
     google3d,
+    aircraft,
+    showAir,
+    onSelectAircraft,
+    selectedHex,
+    airRoute,
+    cameras,
+    showCameras,
+    onSelectCamera,
+    selectedCameraId,
   } = props;
 
   const drawing = drawMode != null;
@@ -409,6 +439,27 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
       ...buildDraftLayers(
         drawMode ? { shape: drawMode, points: draw.points, hover: draw.hover, color: drawColor } : null,
       ),
+      // Air traffic draws on top of the sea picture when toggled on. The
+      // selected aircraft's flight route (great-circle arc) sits beneath the
+      // planes so the icons stay legible.
+      ...(showAir ? buildRouteLayers(airRoute) : []),
+      ...(showAir
+        ? buildAircraftLayers({
+            aircraft,
+            currentTime,
+            selectedHex,
+            onClick: onSelectAircraft,
+          })
+        : []),
+      // London traffic cameras (land) — fixed markers, shown when zoomed in.
+      ...(showCameras
+        ? buildCameraLayers({
+            cameras,
+            zoom,
+            selectedId: selectedCameraId,
+            onClick: onSelectCamera,
+          })
+        : []),
     ],
     // currentTime drives trail animation + motion; version drives data refresh.
     [
@@ -426,6 +477,15 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
       zoom,
       cinematic,
       google3d,
+      aircraft,
+      showAir,
+      selectedHex,
+      airRoute,
+      onSelectAircraft,
+      cameras,
+      showCameras,
+      selectedCameraId,
+      onSelectCamera,
       densityMode,
       drawing,
       showTrails,
@@ -504,9 +564,15 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
       getTooltip={({ object }) =>
         drawing
           ? null
-          : object && (object as Alert).category
-            ? buildAlertTooltip(object as Alert)
-            : buildTooltip(object as TrackedVessel | null)
+          : // Check aircraft first: they carry a `category` field (ADS-B emitter
+            // class) that would otherwise be mistaken for an Alert's category.
+            object && (object as TrackedAircraft).hex
+            ? buildAircraftTooltip(object as TrackedAircraft)
+            : object && (object as Camera).image
+              ? buildCameraTooltip(object as Camera)
+              : object && (object as Alert).category
+                ? buildAlertTooltip(object as Alert)
+                : buildTooltip(object as TrackedVessel | null)
       }
       onClick={(info) => {
         if (drawing) {
@@ -514,8 +580,12 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
             draw.onMapClick([info.coordinate[0], info.coordinate[1]]);
           return;
         }
-        // Click on empty water (no vessel, no fence) clears the vessel selection.
-        if (!info.object) onSelect(null);
+        // Click on empty space (no vessel, aircraft, camera, fence) clears all.
+        if (!info.object) {
+          onSelect(null);
+          onSelectAircraft(null);
+          onSelectCamera(null);
+        }
       }}
       // Attach drag/hover handlers ONLY while drawing a geofence. When they're
       // present, deck runs a picking pass on every drag-move to populate the
@@ -648,6 +718,51 @@ function buildTooltip(v: TrackedVessel | null) {
   };
 }
 
+function buildAircraftTooltip(a: TrackedAircraft) {
+  const title = a.callsign ?? a.reg ?? a.hex.toUpperCase();
+  const alt = a.on_ground
+    ? "on ground"
+    : a.alt_baro != null
+      ? `${Math.round(a.alt_baro).toLocaleString()} ft`
+      : "—";
+  const speed = a.gs != null ? `${Math.round(a.gs)} kn` : "—";
+  const climb =
+    a.baro_rate != null && Math.abs(a.baro_rate) >= 100
+      ? ` ${a.baro_rate > 0 ? "▲" : "▼"}${Math.abs(Math.round(a.baro_rate))} fpm`
+      : "";
+  const type = a.ac_type ? ` · ${escapeHtml(a.ac_type)}` : "";
+  return {
+    html: `
+      <div style="font-family:Inter,system-ui,sans-serif;min-width:150px">
+        <div style="display:flex;align-items:center;gap:6px;font-weight:600;margin-bottom:4px">
+          <span style="width:8px;height:8px;border-radius:9999px;background:#7dd3fc"></span>
+          ${escapeHtml(title)}${type}
+        </div>
+        <div style="opacity:.7;font-size:11px;line-height:1.5">
+          Alt ${alt}${climb}<br/>
+          Speed ${speed} · Track ${a.track != null ? Math.round(a.track) + "°" : "—"}
+        </div>
+      </div>`,
+    style: tooltipStyle(),
+  };
+}
+
+function buildCameraTooltip(c: Camera) {
+  return {
+    html: `
+      <div style="font-family:Inter,system-ui,sans-serif;min-width:150px">
+        <div style="display:flex;align-items:center;gap:6px;font-weight:600;margin-bottom:2px">
+          <span style="width:8px;height:8px;border-radius:9999px;background:${c.available ? "#fbbf24" : "#94a3b8"}"></span>
+          ${escapeHtml(c.name ?? "Traffic camera")}
+        </div>
+        <div style="opacity:.7;font-size:11px">
+          ${c.available ? "Click to view live" : "Offline"}
+        </div>
+      </div>`,
+    style: tooltipStyle(),
+  };
+}
+
 const ALERT_VERB: Record<string, string> = {
   rendezvous: "Rendezvous",
   spoof: "Position jump / spoof",
@@ -698,7 +813,9 @@ function tooltipStyle() {
 }
 
 function escapeHtml(s: string) {
-  return s.replace(/[&<>"]/g, (c) =>
+  // Coerce defensively: a tooltip must never throw (deck calls it on every
+  // hover/pick, so a thrown error there stalls all map interaction).
+  return String(s ?? "").replace(/[&<>"]/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!,
   );
 }

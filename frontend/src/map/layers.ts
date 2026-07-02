@@ -605,8 +605,9 @@ const MAX_DR_SEC = 150;
 /**
  * Project a position forward along the vessel's course at its speed.
  * Returns [lon, lat]. Stationary/unknown-course vessels stay put.
+ * Also used by the aircraft layer (track/ground-speed share these units).
  */
-function deadReckon(
+export function deadReckon(
   lat: number,
   lon: number,
   cog: number | null,

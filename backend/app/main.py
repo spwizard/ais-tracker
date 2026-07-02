@@ -22,6 +22,7 @@ import os
 import time
 from contextlib import asynccontextmanager
 
+import anthropic
 import httpx
 from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -49,8 +50,12 @@ from .sanctions import SanctionsStore
 from .weather import WeatherSource, WaveSource
 from .weather_point import WindyPoint
 from .ship_types import SHIP_TYPE_GROUPS
-from .sources import create_sources
+from .air.enrich import AircraftEnricher
+from .land.cameras import CameraCatalog
+from .land.vision import CameraAnalyst, VisionUnavailable
+from .sources import AdsbLolSource, create_sources
 from .store import create_store
+from .store.aircraft import AircraftStore
 from .ws.broadcaster import Broadcaster
 
 logging.basicConfig(
@@ -191,7 +196,28 @@ async def lifespan(app: FastAPI):
     await store.start()
     app.state.store = store
 
-    broadcaster = Broadcaster(store, settings.broadcast_hz)
+    # Aircraft (ADS-B) domain — a parallel in-memory store, fanned out on the
+    # same socket. None when the air feed is disabled.
+    air_store = AircraftStore() if settings.enable_air else None
+    if air_store is not None:
+        await air_store.start()
+    app.state.air_store = air_store
+    # Aircraft enrichment (registration / operator / route / photo) via adsbdb.
+    app.state.air_enricher = AircraftEnricher() if settings.enable_air else None
+    # Land domain: London traffic cameras (TfL JamCams), lazily fetched + cached.
+    app.state.cameras = (
+        CameraCatalog(settings.tfl_jamcam_url, settings.tfl_app_key)
+        if settings.enable_cameras
+        else None
+    )
+    # Claude-vision "analyze scene" for cameras (aggregate counts + congestion).
+    app.state.camera_analyst = (
+        CameraAnalyst(settings.camera_vision_model, settings.anthropic_api_key)
+        if settings.enable_cameras
+        else None
+    )
+
+    broadcaster = Broadcaster(store, settings.broadcast_hz, air_store=air_store)
     broadcaster.start()
     app.state.broadcaster = broadcaster
 
@@ -213,6 +239,10 @@ async def lifespan(app: FastAPI):
 
     # Data sources — each owns one upstream connection, all feed the same store.
     sources = create_sources(store, settings, registry)
+    # Aircraft feed writes into the air store but shares the same health/rate/
+    # supervisor rails, so it lives alongside the vessel sources.
+    if air_store is not None:
+        sources.append(AdsbLolSource(air_store, settings))
     for src in sources:
         src.start()
     app.state.sources = sources
@@ -356,10 +386,18 @@ async def lifespan(app: FastAPI):
         ownership.close()
         await broadcaster.stop()
         await store.close()
+        if air_store is not None:
+            await air_store.close()
+        if app.state.air_enricher is not None:
+            await app.state.air_enricher.close()
+        if app.state.cameras is not None:
+            await app.state.cameras.close()
+        if app.state.camera_analyst is not None:
+            await app.state.camera_analyst.close()
         await _http.aclose()
 
 
-app = FastAPI(title="AIS Tracker API", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="Argus Eyes API", version="1.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -390,6 +428,7 @@ async def healthz():
         "status": "ok",
         "sources": [_source_status(s) for s in app.state.sources],
         "vessels": await app.state.store.count(),
+        "aircraft": await app.state.air_store.count() if app.state.air_store else 0,
         "clients": app.state.broadcaster.client_count,
         "registry": app.state.registry.count() if app.state.registry else 0,
         "data": {
@@ -406,6 +445,10 @@ async def feature_flags():
     flags = get_flags()
     # Photoreal 3D available only when a Google key is configured server-side.
     flags["google_3d"] = bool(app.state.settings.google_maps_key)
+    # Air-traffic layer available only when the ADS-B feed is enabled server-side.
+    flags["air"] = bool(app.state.settings.enable_air)
+    # London traffic cameras available when the TfL feed is enabled server-side.
+    flags["cameras"] = bool(app.state.settings.enable_cameras)
     return {"flags": flags}
 
 
@@ -466,6 +509,71 @@ async def google_3d_proxy(path: str, request: Request):
 @app.get("/api/sources")
 async def list_sources():
     return {"sources": [_source_status(s) for s in app.state.sources]}
+
+
+@app.get("/api/aircraft/{hex}")
+async def aircraft_detail(hex: str):
+    """Dossier for one aircraft: the live ADS-B record plus static enrichment
+    (airframe/operator/photo + flight route) from adsbdb. The air-domain
+    analogue of the per-vessel ownership/conditions lookups."""
+    store = app.state.air_store
+    if store is None:
+        raise HTTPException(404, "air feed disabled")
+    ac = await store.get(hex)
+    enricher = app.state.air_enricher
+    info = await enricher.aircraft(hex) if enricher else None
+    route = (
+        await enricher.route(ac.callsign)
+        if enricher and ac and ac.callsign
+        else None
+    )
+    return {
+        "aircraft": ac.model_dump() if ac else None,
+        "info": info,
+        "route": route,
+    }
+
+
+@app.get("/api/cameras")
+async def list_cameras():
+    """London traffic cameras (TfL JamCams) — the 'land' surveillance layer.
+    Each has a live-ish snapshot + a 5s clip the browser loads directly."""
+    catalog = app.state.cameras
+    if catalog is None:
+        raise HTTPException(404, "cameras disabled")
+    try:
+        cams = await catalog.list()
+    except httpx.HTTPError as exc:
+        log.warning("TfL cameras fetch failed: %s", exc)
+        raise HTTPException(502, "camera feed unavailable")
+    return {"cameras": cams}
+
+
+@app.post("/api/cameras/{cam_id:path}/analyze")
+async def analyze_camera(cam_id: str):
+    """Claude-vision scene analysis of a camera's current snapshot — aggregate,
+    anonymous counts + congestion. No plate/individual identification."""
+    catalog = app.state.cameras
+    analyst = app.state.camera_analyst
+    if catalog is None or analyst is None:
+        raise HTTPException(404, "cameras disabled")
+    cams = await catalog.list()
+    cam = next((c for c in cams if c["id"] == cam_id), None)
+    if cam is None:
+        raise HTTPException(404, "unknown camera")
+    if not cam.get("available"):
+        raise HTTPException(409, "camera offline")
+    try:
+        analysis = await analyst.analyze(cam["image"])
+    except VisionUnavailable as exc:
+        raise HTTPException(503, str(exc))
+    except anthropic.APIError as exc:
+        log.warning("camera vision failed: %s", exc)
+        raise HTTPException(502, "vision analysis failed")
+    except httpx.HTTPError as exc:
+        log.warning("camera snapshot fetch failed: %s", exc)
+        raise HTTPException(502, "could not fetch snapshot")
+    return {"analysis": analysis.model_dump()}
 
 
 @app.get("/api/meta")

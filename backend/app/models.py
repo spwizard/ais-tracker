@@ -81,3 +81,28 @@ class Vessel(BaseModel):
         for key, value in data.items():
             setattr(self, key, value)
         return self
+
+
+class Aircraft(BaseModel):
+    """Full current state for one aircraft — the air-domain analogue of ``Vessel``.
+
+    Sourced from ADS-B (adsb.lol). Unlike AIS, each poll returns a *complete*
+    record, so there's no partial-merge: the source replaces the record wholesale.
+    Keyed by ``hex`` (the ICAO24 transponder address).
+    """
+
+    hex: str  # ICAO24 transponder address — the stable key
+    callsign: Optional[str] = None  # flight number / callsign
+    lat: Optional[float] = None
+    lon: Optional[float] = None
+    track: Optional[float] = None  # ground track, degrees clockwise from north
+    gs: Optional[float] = None  # ground speed, knots
+    alt_baro: Optional[float] = None  # barometric altitude, feet (None on the ground)
+    baro_rate: Optional[float] = None  # vertical rate, feet/min (+climb / -descend)
+    on_ground: bool = False
+    category: Optional[str] = None  # ADS-B emitter category (A1..C7)
+    ac_type: Optional[str] = None  # ICAO aircraft type designator (e.g. B738)
+    reg: Optional[str] = None  # registration / tail number
+    squawk: Optional[str] = None  # transponder code (7500/7600/7700 = emergencies)
+
+    ts: float = 0.0  # last update (epoch seconds)

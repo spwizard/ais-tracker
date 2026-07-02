@@ -38,6 +38,38 @@ class Settings(BaseSettings):
     kystverket_host: str = Field(default="153.44.253.27", alias="KYSTVERKET_HOST")
     kystverket_port: int = Field(default=5631, alias="KYSTVERKET_PORT")
 
+    # --- Air traffic (ADS-B via adsb.lol — free, no key, non-commercial) ----
+    enable_air: bool = Field(default=True, alias="ENABLE_AIR")
+    adsb_url: str = Field(default="https://api.adsb.lol", alias="ADSB_URL")
+    # Poll regions as JSON: a list of [lat, lon, radius_nm] circles (adsb.lol max
+    # 250 nm each). Defaults cover the same footprint as the AIS feeds — UK/
+    # Channel, the Norwegian coast/Skagerrak, and the Baltic/Gulf of Finland — so
+    # aircraft appear wherever the vessels do.
+    air_regions_raw: str = Field(
+        default=json.dumps(
+            [[50.5, 0.0, 250], [59.5, 7.0, 250], [59.5, 23.0, 250]]
+        ),
+        alias="AIR_REGIONS",
+    )
+    air_poll_sec: float = Field(default=4.0, alias="AIR_POLL_SEC")
+    air_ttl_sec: int = Field(default=90, alias="AIR_TTL_SEC")  # drop if silent >90s
+
+    @property
+    def air_regions(self) -> list[tuple[float, float, int]]:
+        return [tuple(r) for r in json.loads(self.air_regions_raw)]
+
+    # --- Land: London traffic cameras (TfL JamCams — free, keyless) --------
+    enable_cameras: bool = Field(default=True, alias="ENABLE_CAMERAS")
+    tfl_jamcam_url: str = Field(
+        default="https://api.tfl.gov.uk/Place/Type/JamCam", alias="TFL_JAMCAM_URL"
+    )
+    tfl_app_key: str = Field(default="", alias="TFL_APP_KEY")  # optional, raises limits
+    # Claude-vision model for the "analyze scene" camera feature (fast + cheap;
+    # it's a simple structured count/congestion read on a tiny still).
+    camera_vision_model: str = Field(
+        default="claude-haiku-4-5", alias="CAMERA_VISION_MODEL"
+    )
+
     # --- AISStream ---------------------------------------------------------
     aisstream_api_key: str = Field(default="", alias="AISSTREAM_API_KEY")
     aisstream_url: str = Field(

@@ -1,12 +1,22 @@
 import { useCallback, useEffect, useState } from "react";
 
-export type PanelId = "filters" | "stats" | "layers" | "detail" | "zones" | "analyst";
+export type PanelId =
+  | "filters"
+  | "stats"
+  | "layers"
+  | "detail"
+  | "aircraft"
+  | "camera"
+  | "zones"
+  | "analyst";
 
 export const PANEL_IDS: PanelId[] = [
   "filters",
   "stats",
   "layers",
   "detail",
+  "aircraft",
+  "camera",
   "zones",
   "analyst",
 ];
@@ -17,6 +27,8 @@ export const PANEL_W: Record<PanelId, number> = {
   stats: 256,
   layers: 240,
   detail: 320,
+  aircraft: 380,
+  camera: 360,
   zones: 288,
   analyst: 380,
 };
@@ -27,6 +39,8 @@ export const PANEL_EST_H: Record<PanelId, number> = {
   stats: 340,
   layers: 175,
   detail: 380,
+  aircraft: 440,
+  camera: 330,
   zones: 360,
   analyst: 540,
 };
@@ -72,6 +86,16 @@ function defaults(): PanelMap {
     detail: {
       open: false,
       x: vw - MARGIN - PANEL_W.detail,
+      y: MARGIN + PANEL_EST_H.stats + GAP,
+    },
+    aircraft: {
+      open: false,
+      x: vw - MARGIN - PANEL_W.aircraft,
+      y: MARGIN + PANEL_EST_H.stats + GAP,
+    },
+    camera: {
+      open: false,
+      x: vw - MARGIN - PANEL_W.camera,
       y: MARGIN + PANEL_EST_H.stats + GAP,
     },
     zones: {

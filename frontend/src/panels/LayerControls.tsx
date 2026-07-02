@@ -1,4 +1,4 @@
-import { Layers, Route, Navigation, Flame, Wind, Waves, History, Loader2, Mountain } from "lucide-react";
+import { Layers, Route, Navigation, Flame, Wind, Waves, History, Loader2, Mountain, Plane, Cctv } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -17,6 +17,12 @@ interface LayerControlsProps {
   showWaves: boolean;
   onToggleWaves: (v: boolean) => void;
   wavesAvailable: boolean;
+  showAir: boolean;
+  onToggleAir: (v: boolean) => void;
+  airAvailable: boolean;
+  showCameras: boolean;
+  onToggleCameras: (v: boolean) => void;
+  camerasAvailable: boolean;
   replayMode: boolean;
   onToggleReplay: (v: boolean) => void;
   replayAvailable: boolean;
@@ -50,6 +56,12 @@ export function LayerControls({
   showWaves,
   onToggleWaves,
   wavesAvailable,
+  showAir,
+  onToggleAir,
+  airAvailable,
+  showCameras,
+  onToggleCameras,
+  camerasAvailable,
   replayMode,
   onToggleReplay,
   replayAvailable,
@@ -98,6 +110,36 @@ export function LayerControls({
             </span>
             <Switch checked={showWaves} onCheckedChange={onToggleWaves} />
           </label>
+        )}
+
+        {airAvailable && (
+          <>
+            <label className="flex cursor-pointer items-center justify-between rounded-md px-1 py-1">
+              <span className="flex items-center gap-2 text-sm">
+                <Plane className="h-4 w-4 text-muted-foreground" />
+                Air traffic (ADS-B)
+              </span>
+              <Switch checked={showAir} onCheckedChange={onToggleAir} />
+            </label>
+            <p className="px-1 text-[10px] leading-snug text-muted-foreground/60">
+              Live aircraft over the region, coloured by altitude.
+            </p>
+          </>
+        )}
+
+        {camerasAvailable && (
+          <>
+            <label className="flex cursor-pointer items-center justify-between rounded-md px-1 py-1">
+              <span className="flex items-center gap-2 text-sm">
+                <Cctv className="h-4 w-4 text-muted-foreground" />
+                Traffic cameras (London)
+              </span>
+              <Switch checked={showCameras} onCheckedChange={onToggleCameras} />
+            </label>
+            <p className="px-1 text-[10px] leading-snug text-muted-foreground/60">
+              Live TfL junction cameras — zoom into London, then click one.
+            </p>
+          </>
         )}
 
         <Separator />

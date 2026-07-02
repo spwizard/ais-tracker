@@ -263,10 +263,98 @@ export interface RiskAssessment {
   reasons: RiskReason[];
 }
 
+/** A live aircraft (ADS-B), the air-domain analogue of Vessel. Keyed by `hex`. */
+export interface Aircraft {
+  hex: string; // ICAO24 transponder address
+  callsign: string | null; // flight number / callsign
+  lat: number | null;
+  lon: number | null;
+  track: number | null; // ground track, degrees clockwise from north
+  gs: number | null; // ground speed, knots
+  alt_baro: number | null; // barometric altitude, feet (null on the ground)
+  baro_rate: number | null; // vertical rate, feet/min
+  on_ground: boolean;
+  category: string | null; // ADS-B emitter category (A1..C7)
+  ac_type: string | null; // ICAO aircraft type designator
+  reg: string | null; // registration / tail number
+  squawk: string | null;
+  ts: number; // last update, epoch seconds
+}
+
+/** Aircraft carrying a client-side dead-reckoning trail (rendered record). */
+export interface TrackedAircraft extends Aircraft {
+  trail: [number, number, number][]; // [lon, lat, ts]
+}
+
+/** An airport in a flight route (from GET /api/aircraft/{hex}). */
+export interface Airport {
+  name: string | null;
+  iata: string | null;
+  icao: string | null;
+  municipality: string | null;
+  country: string | null;
+  country_iso: string | null;
+  lat: number | null;
+  lon: number | null;
+}
+
+/** Static airframe/operator enrichment (adsbdb). */
+export interface AircraftInfo {
+  registration: string | null;
+  type: string | null;
+  icao_type: string | null;
+  manufacturer: string | null;
+  owner: string | null;
+  owner_country: string | null;
+  owner_country_iso: string | null;
+  operator_flag: string | null;
+  photo: string | null;
+  photo_thumb: string | null;
+}
+
+export interface AircraftRoute {
+  airline: { name: string | null; icao: string | null; iata: string | null };
+  origin: Airport | null;
+  destination: Airport | null;
+}
+
+/** Response of GET /api/aircraft/{hex} — live record + enrichment. */
+export interface AircraftDossier {
+  aircraft: Aircraft | null;
+  info: AircraftInfo | null;
+  route: AircraftRoute | null;
+}
+
+/** Claude-vision scene analysis of a camera snapshot (aggregate, anonymous). */
+export interface CameraAnalysis {
+  congestion: "clear" | "light" | "moderate" | "heavy" | "jam";
+  cars: number;
+  buses: number;
+  trucks: number;
+  motorcycles: number;
+  cyclists: number;
+  pedestrians: number;
+  summary: string;
+}
+
+/** A London traffic camera (TfL JamCam) — the "land" domain. */
+export interface Camera {
+  id: string;
+  name: string | null;
+  lat: number;
+  lon: number;
+  view: string | null; // direction the camera faces, e.g. "West"
+  image: string; // JPEG snapshot (refreshed every few minutes)
+  video: string | null; // 5-second looped MP4
+  available: boolean;
+}
+
 /** WebSocket frames from the backend broadcaster. */
 export type ServerFrame =
   | { type: "snapshot"; vessels: Vessel[] }
   | { type: "update"; vessels: Vessel[]; removed: number[] }
+  | { type: "air_snapshot"; aircraft: Aircraft[] }
+  | { type: "air_update"; aircraft: Aircraft[]; removed: string[] }
   | GeofenceEvent
   | RiskEvent
   | { type: "flagged"; mmsis: number[] }

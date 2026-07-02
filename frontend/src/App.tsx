@@ -12,6 +12,13 @@ import { AlertsContent } from "@/panels/AlertsContent";
 import { StatsPanel } from "@/panels/StatsPanel";
 import { LayerControls } from "@/panels/LayerControls";
 import { VesselDetail } from "@/panels/VesselDetail";
+import { AircraftDetail } from "@/panels/AircraftDetail";
+import { useAircraftDossier } from "@/hooks/useAircraftDossier";
+import { assessRoute } from "@/lib/airRoute";
+import type { AirRoute } from "@/map/aircraftLayers";
+import { CameraView } from "@/panels/CameraView";
+import { useCameras } from "@/hooks/useCameras";
+import type { Camera } from "@/types";
 import { MapControls } from "@/panels/MapControls";
 import { ZonesPanel } from "@/panels/ZonesPanel";
 import { DrawToolbar } from "@/panels/DrawToolbar";
@@ -48,7 +55,7 @@ import {
 import type { PanelChrome } from "@/components/FloatingPanel";
 import { defaultFilters, matchesFilter, SPEED_MAX, type Filters } from "@/lib/filters";
 import { colorRgbFor, groupKeyFor, SHIP_TYPE_GROUPS } from "@/lib/shipTypes";
-import type { TrackedVessel } from "@/types";
+import type { TrackedVessel, TrackedAircraft } from "@/types";
 
 function fenceName(cat: FenceCategory, fences: Geofence[]): string {
   const label = FENCE_CATEGORIES.find((c) => c.key === cat)?.label.split(" ")[0] ?? "Zone";
@@ -60,7 +67,7 @@ const SEARCH_API = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 const SEARCH_TRACK_COLOR: [number, number, number] = [180, 210, 255];
 
 export default function App() {
-  const { vesselsRef, version, status, events, riskEvents, flagged, geofenceSync } =
+  const { vesselsRef, aircraftRef, version, status, events, riskEvents, flagged, geofenceSync } =
     useVesselsSocket();
   const { panels, setOpen, toggle, togglePin, move, focus, zIndexOf, autoPlace } =
     usePanels();
@@ -76,8 +83,15 @@ export default function App() {
   const [is3D, setIs3D] = useState(false);
   const [cinematic, setCinematic] = useState(false);
   const google3d = useFlag("google_3d"); // backend proxy can serve photoreal tiles
+  const [showAir, setShowAir] = useState(false); // ADS-B air-traffic layer (opt-in)
+  const airAvailable = useFlag("air"); // backend ADS-B feed is enabled
+  const [showCameras, setShowCameras] = useState(false); // London traffic cameras
+  const camerasAvailable = useFlag("cameras");
+  const [selectedCameraId, setSelectedCameraId] = useState<string | null>(null);
   const [selectedMmsi, setSelectedMmsi] = useState<number | null>(null);
   const [networkMmsi, setNetworkMmsi] = useState<number | null>(null);
+  const [selectedHex, setSelectedHex] = useState<string | null>(null); // selected aircraft
+  const [showAircraftRoute, setShowAircraftRoute] = useState(true);
 
   // GFS wind particle overlay + GFS-Wave sea state. Metadata (incl. forecast
   // steps) loads whenever the feature flag is on so the toggles + scrubber can
@@ -240,6 +254,54 @@ export default function App() {
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [version, vesselsRef]);
+
+  // Aircraft (ADS-B) — materialized only while the layer is on, same version bump.
+  const aircraft = useMemo<TrackedAircraft[]>(() => {
+    if (!showAir) return [];
+    const out: TrackedAircraft[] = [];
+    for (const a of aircraftRef.current.values()) {
+      if (a.lat != null && a.lon != null) out.push(a);
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [version, aircraftRef, showAir]);
+
+  // Selected aircraft (live record) + its dossier (registration/operator/route).
+  const selectedAircraft = useMemo(
+    () => (selectedHex ? aircraftRef.current.get(selectedHex) ?? null : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selectedHex, version, aircraftRef],
+  );
+  const { data: airDossier, loading: airDossierLoading } = useAircraftDossier(selectedHex);
+  // Cross-check the callsign-derived route against the live position (recomputes
+  // as the plane moves, via the `version`-keyed selectedAircraft).
+  const routeAssessment = useMemo(
+    () =>
+      selectedAircraft && airDossier?.route
+        ? assessRoute(selectedAircraft, airDossier.route)
+        : { plausible: true, note: null },
+    [selectedAircraft, airDossier],
+  );
+  // Origin → destination airports for the map overlay — only drawn when the
+  // route is toggled on AND the live position actually supports it.
+  const airRoute = useMemo<AirRoute | null>(() => {
+    const r = airDossier?.route;
+    if (!showAircraftRoute || !routeAssessment.plausible) return null;
+    if (!r?.origin?.lat || !r?.destination?.lat) return null;
+    return {
+      from: [r.origin.lon as number, r.origin.lat as number],
+      to: [r.destination.lon as number, r.destination.lat as number],
+      fromLabel: r.origin.iata ?? r.origin.icao ?? "",
+      toLabel: r.destination.iata ?? r.destination.icao ?? "",
+    };
+  }, [airDossier, showAircraftRoute, routeAssessment]);
+
+  // London traffic cameras (fetched once when the layer is first switched on).
+  const cameras = useCameras(showCameras);
+  const selectedCamera = useMemo(
+    () => (selectedCameraId ? cameras.find((c) => c.id === selectedCameraId) ?? null : null),
+    [selectedCameraId, cameras],
+  );
 
   const filtered = useMemo(
     () => allVessels.filter((v) => matchesFilter(v, filters)),
@@ -467,6 +529,30 @@ export default function App() {
     }
   };
 
+  // Aircraft selection → its own detail panel (independent of the vessel one).
+  const selectAircraft = (a: TrackedAircraft | null) => {
+    setSelectedHex(a?.hex ?? null);
+    if (a) {
+      setOpen("aircraft", true);
+      autoPlace("aircraft");
+      focus("aircraft");
+    } else {
+      setOpen("aircraft", false);
+    }
+  };
+
+  // Camera selection → the live camera view panel.
+  const selectCamera = (c: Camera | null) => {
+    setSelectedCameraId(c?.id ?? null);
+    if (c) {
+      setOpen("camera", true);
+      autoPlace("camera");
+      focus("camera");
+    } else {
+      setOpen("camera", false);
+    }
+  };
+
   // Selecting a vessel from the replay view: highlight its route AND, when the
   // vessel is still transmitting, open the detail panel (which reads live state).
   const selectReplayVessel = (mmsi: number | null) => {
@@ -590,6 +676,15 @@ export default function App() {
         onDrawCancel={() => setDrawMode(null)}
         cinematic={cinematic}
         google3d={google3d}
+        aircraft={aircraft}
+        showAir={showAir}
+        onSelectAircraft={selectAircraft}
+        selectedHex={selectedHex}
+        airRoute={airRoute}
+        cameras={cameras}
+        showCameras={showCameras}
+        onSelectCamera={selectCamera}
+        selectedCameraId={selectedCameraId}
       />
 
       {/* Floating UI — pointer-events re-enabled per element. */}
@@ -608,6 +703,8 @@ export default function App() {
             stats: panels.stats.open,
             layers: panels.layers.open,
             detail: panels.detail.open,
+            aircraft: panels.aircraft.open,
+            camera: panels.camera.open,
             zones: panels.zones.open,
             analyst: panels.analyst.open,
           }}
@@ -674,6 +771,12 @@ export default function App() {
             showWaves={showWaves}
             onToggleWaves={setShowWaves}
             wavesAvailable={waves.available}
+            showAir={showAir}
+            onToggleAir={setShowAir}
+            airAvailable={airAvailable}
+            showCameras={showCameras}
+            onToggleCameras={setShowCameras}
+            camerasAvailable={camerasAvailable}
             replayMode={replayMode}
             onToggleReplay={toggleReplay}
             replayAvailable={replayAvailable}
@@ -696,6 +799,33 @@ export default function App() {
             onToggleShowOnMap={() => setShowSelectedTrack((s) => !s)}
             onZoomToTrack={zoomToTrack}
             onOpenNetwork={setNetworkMmsi}
+          />
+        )}
+        {panels.aircraft.open && selectedAircraft && (
+          <AircraftDetail
+            chrome={chromeFor("aircraft")}
+            aircraft={selectedAircraft}
+            dossier={airDossier}
+            loading={airDossierLoading}
+            showRoute={showAircraftRoute}
+            routeWarning={routeAssessment.note}
+            onToggleShowRoute={() => setShowAircraftRoute((s) => !s)}
+            onZoomToRoute={() => {
+              if (airRoute) mapRef.current?.fitBounds([airRoute.from, airRoute.to]);
+            }}
+          />
+        )}
+        {panels.camera.open && selectedCamera && (
+          <CameraView
+            chrome={chromeFor("camera")}
+            camera={selectedCamera}
+            onZoomTo={() =>
+              mapRef.current?.flyTo({
+                longitude: selectedCamera.lon,
+                latitude: selectedCamera.lat,
+                zoom: 15,
+              })
+            }
           />
         )}
         {panels.zones.open && (

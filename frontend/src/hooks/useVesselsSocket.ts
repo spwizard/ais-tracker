@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
+  Aircraft,
   ConnectionStatus,
   GeofenceEvent,
   RiskEvent,
   ServerFrame,
+  TrackedAircraft,
   TrackedVessel,
   Vessel,
 } from "@/types";
@@ -35,6 +37,8 @@ const TRAIL_MAX = 60; // positions kept client-side per vessel for trails
 export function useVesselsSocket() {
   // The live store. Never triggers renders directly.
   const vesselsRef = useRef<Map<number, TrackedVessel>>(new Map());
+  // Live aircraft (ADS-B), same ref-not-state strategy, keyed by hex.
+  const aircraftRef = useRef<Map<string, TrackedAircraft>>(new Map());
   const [version, setVersion] = useState(0);
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
   const [events, setEvents] = useState<GeofenceEvent[]>([]);
@@ -71,6 +75,21 @@ export function useVesselsSocket() {
     map.set(v.mmsi, { ...prev, ...v, trail });
   }, []);
 
+  const applyAircraft = useCallback((a: Aircraft) => {
+    const map = aircraftRef.current;
+    const prev = map.get(a.hex);
+    const trail = prev?.trail ?? [];
+    if (
+      a.lat != null &&
+      a.lon != null &&
+      (prev?.lat !== a.lat || prev?.lon !== a.lon)
+    ) {
+      trail.push([a.lon, a.lat, a.ts]);
+      if (trail.length > TRAIL_MAX) trail.shift();
+    }
+    map.set(a.hex, { ...prev, ...a, trail });
+  }, []);
+
   useEffect(() => {
     let ws: WebSocket | null = null;
     let closedByUs = false;
@@ -102,6 +121,12 @@ export function useVesselsSocket() {
         } else if (frame.type === "update") {
           for (const v of frame.vessels) applyVessel(v);
           for (const mmsi of frame.removed) vesselsRef.current.delete(mmsi);
+        } else if (frame.type === "air_snapshot") {
+          aircraftRef.current.clear();
+          for (const a of frame.aircraft) applyAircraft(a);
+        } else if (frame.type === "air_update") {
+          for (const a of frame.aircraft) applyAircraft(a);
+          for (const hex of frame.removed) aircraftRef.current.delete(hex);
         } else if (frame.type === "geofence_event") {
           setEvents((prev) => [frame, ...prev].slice(0, MAX_EVENTS));
           return; // not a vessel update — no render bump needed
@@ -148,7 +173,16 @@ export function useVesselsSocket() {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       ws?.close();
     };
-  }, [applyVessel, scheduleRender]);
+  }, [applyVessel, applyAircraft, scheduleRender]);
 
-  return { vesselsRef, version, status, events, riskEvents, flagged, geofenceSync };
+  return {
+    vesselsRef,
+    aircraftRef,
+    version,
+    status,
+    events,
+    riskEvents,
+    flagged,
+    geofenceSync,
+  };
 }
