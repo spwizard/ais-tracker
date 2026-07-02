@@ -17,7 +17,9 @@ import { useAircraftDossier } from "@/hooks/useAircraftDossier";
 import { assessRoute } from "@/lib/airRoute";
 import type { AirRoute } from "@/map/aircraftLayers";
 import { CameraView } from "@/panels/CameraView";
+import { CameraWall } from "@/panels/CameraWall";
 import { useCameras } from "@/hooks/useCameras";
+import { useCameraWall } from "@/hooks/useCameraWall";
 import type { Camera } from "@/types";
 import { MapControls } from "@/panels/MapControls";
 import { ZonesPanel } from "@/panels/ZonesPanel";
@@ -88,6 +90,7 @@ export default function App() {
   const [showCameras, setShowCameras] = useState(false); // London traffic cameras
   const camerasAvailable = useFlag("cameras");
   const [selectedCameraId, setSelectedCameraId] = useState<string | null>(null);
+  const wall = useCameraWall(); // multi-feed camera wall (grid of up to 12)
   const [selectedMmsi, setSelectedMmsi] = useState<number | null>(null);
   const [networkMmsi, setNetworkMmsi] = useState<number | null>(null);
   const [selectedHex, setSelectedHex] = useState<string | null>(null); // selected aircraft
@@ -296,8 +299,24 @@ export default function App() {
     };
   }, [airDossier, showAircraftRoute, routeAssessment]);
 
-  // London traffic cameras (fetched once when the layer is first switched on).
-  const cameras = useCameras(showCameras);
+  // London traffic cameras (fetched once when the layer or the wall needs them).
+  const cameras = useCameras(showCameras || wall.open);
+  // Bulk-add the cameras currently in the map view (nearest the centre first).
+  const addCamerasInView = useCallback(() => {
+    const b = mapRef.current?.getBounds();
+    if (!b) return;
+    const [w, s, e, n] = b;
+    const cx = (w + e) / 2;
+    const cy = (s + n) / 2;
+    const inView = cameras
+      .filter((c) => c.lon >= w && c.lon <= e && c.lat >= s && c.lat <= n)
+      .sort(
+        (a, z) =>
+          (a.lon - cx) ** 2 + (a.lat - cy) ** 2 - ((z.lon - cx) ** 2 + (z.lat - cy) ** 2),
+      )
+      .map((c) => c.id);
+    wall.addMany(inView);
+  }, [cameras, wall]);
   const selectedCamera = useMemo(
     () => (selectedCameraId ? cameras.find((c) => c.id === selectedCameraId) ?? null : null),
     [selectedCameraId, cameras],
@@ -777,6 +796,8 @@ export default function App() {
             showCameras={showCameras}
             onToggleCameras={setShowCameras}
             camerasAvailable={camerasAvailable}
+            onOpenWall={() => wall.setOpen(true)}
+            wallCount={wall.ids.length}
             replayMode={replayMode}
             onToggleReplay={toggleReplay}
             replayAvailable={replayAvailable}
@@ -826,8 +847,25 @@ export default function App() {
                 zoom: 15,
               })
             }
+            inWall={wall.ids.includes(selectedCamera.id)}
+            onAddToWall={() => wall.add(selectedCamera.id)}
           />
         )}
+        <CameraWall
+          open={wall.open}
+          onOpenChange={wall.setOpen}
+          cameras={cameras}
+          ids={wall.ids}
+          onToggle={wall.toggle}
+          onRemove={wall.remove}
+          onClear={wall.clear}
+          onAddInView={addCamerasInView}
+          onFocus={(c) => {
+            wall.setOpen(false);
+            selectCamera(c);
+          }}
+          max={wall.max}
+        />
         {panels.zones.open && (
           <ZonesPanel
             chrome={chromeFor("zones")}

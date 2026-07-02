@@ -9,6 +9,7 @@ import {
   X,
   Sparkles,
   Loader2,
+  LayoutGrid,
 } from "lucide-react";
 import { Hint } from "@/components/ui/tooltip";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -38,11 +39,19 @@ interface CameraViewProps {
   chrome: PanelChrome;
   camera: Camera;
   onZoomTo: () => void;
+  inWall: boolean;
+  onAddToWall: () => void;
 }
 
 const REFRESH_MS = 90_000; // TfL refreshes snapshots/clips every few minutes
 
-export function CameraView({ chrome, camera, onZoomTo }: CameraViewProps) {
+export function CameraView({
+  chrome,
+  camera,
+  onZoomTo,
+  inWall,
+  onAddToWall,
+}: CameraViewProps) {
   // Bump a key periodically to re-pull the (in-place-updated) media from S3.
   const [refreshKey, setRefreshKey] = useState(0);
   useEffect(() => {
@@ -94,6 +103,21 @@ export function CameraView({ chrome, camera, onZoomTo }: CameraViewProps) {
               </span>
             )}
             <div className="ml-auto flex items-center gap-1">
+              <Hint label={inWall ? "In camera wall" : "Add to camera wall"} side="top">
+                <button
+                  aria-label="Add to camera wall"
+                  onClick={onAddToWall}
+                  disabled={inWall}
+                  className={cn(
+                    "grid h-6 w-6 place-items-center rounded-md transition-colors",
+                    inWall
+                      ? "bg-primary/15 text-primary"
+                      : "text-muted-foreground hover:bg-foreground/10 hover:text-foreground",
+                  )}
+                >
+                  <LayoutGrid className="h-3.5 w-3.5" />
+                </button>
+              </Hint>
               <Hint label="Refresh" side="top">
                 <button
                   aria-label="Refresh camera"

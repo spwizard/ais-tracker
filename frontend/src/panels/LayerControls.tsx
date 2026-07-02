@@ -1,4 +1,4 @@
-import { Layers, Route, Navigation, Flame, Wind, Waves, History, Loader2, Mountain, Plane, Cctv } from "lucide-react";
+import { Layers, Route, Navigation, Flame, Wind, Waves, History, Loader2, Mountain, Plane, Cctv, LayoutGrid } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -23,6 +23,8 @@ interface LayerControlsProps {
   showCameras: boolean;
   onToggleCameras: (v: boolean) => void;
   camerasAvailable: boolean;
+  onOpenWall: () => void;
+  wallCount: number;
   replayMode: boolean;
   onToggleReplay: (v: boolean) => void;
   replayAvailable: boolean;
@@ -62,6 +64,8 @@ export function LayerControls({
   showCameras,
   onToggleCameras,
   camerasAvailable,
+  onOpenWall,
+  wallCount,
   replayMode,
   onToggleReplay,
   replayAvailable,
@@ -139,6 +143,13 @@ export function LayerControls({
             <p className="px-1 text-[10px] leading-snug text-muted-foreground/60">
               Live TfL junction cameras — zoom into London, then click one.
             </p>
+            <button
+              onClick={onOpenWall}
+              className="flex w-full items-center justify-center gap-1.5 rounded-md border border-foreground/10 bg-foreground/5 px-2 py-1.5 text-xs font-medium text-foreground/80 transition-colors hover:bg-foreground/10 hover:text-foreground"
+            >
+              <LayoutGrid className="h-3.5 w-3.5" />
+              Camera wall{wallCount > 0 ? ` (${wallCount})` : ""}
+            </button>
           </>
         )}
 
