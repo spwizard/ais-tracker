@@ -35,9 +35,10 @@ export function buildGoogle3DLayer(onAttribution?: (text: string) => void) {
     }) => {
       if (tileset?.options) {
         tileset.options.maximumScreenSpaceError = 24; // higher = less detail/memory
-        // 512 MB cache: fewer evictions, so revisiting an area (e.g. the Solent)
-        // reuses tiles from memory instead of re-streaming.
-        tileset.options.maximumMemoryUsage = 512;
+        // 256 MB cache: keeps the tab's footprint in check. Revisiting an area
+        // re-streams a little more than a larger cache would, but photoreal tiles
+        // are heavy, so this is the better default for overall memory.
+        tileset.options.maximumMemoryUsage = 256;
       }
       const text = tileset?.credits?.copyright;
       if (text && onAttribution) onAttribution(text);
