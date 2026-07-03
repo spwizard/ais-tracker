@@ -137,6 +137,44 @@ TOOLS: list[dict] = [
     },
 ]
 
+# Land-domain eyes — only offered when the TfL camera feed is enabled.
+CAMERA_TOOLS: list[dict] = [
+    {
+        "name": "find_cameras",
+        "description": (
+            "Search London's ~880 live TfL traffic cameras (the app's land-domain "
+            "eyes). Filter by a road/place name substring and/or sort by distance "
+            "to a lat/lon. Returns camera ids, names, positions and view direction."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Road or place substring, e.g. 'A40', 'Earls Court', 'Tower Bridge'",
+                },
+                "lat": {"type": "number", "description": "With lon: sort nearest-first to this point"},
+                "lon": {"type": "number"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 15},
+            },
+        },
+    },
+    {
+        "name": "view_camera",
+        "description": (
+            "LOOK through one traffic camera right now: runs AI vision on its live "
+            "snapshot and returns congestion (clear/light/moderate/heavy/jam), "
+            "approximate counts of road users by type, and a one-line scene "
+            "description. Use find_cameras first to get a camera_id."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"camera_id": {"type": "string"}},
+            "required": ["camera_id"],
+        },
+    },
+]
+
 SYSTEM_PROMPT = """\
 You are the on-duty maritime intelligence analyst inside a live vessel-tracking \
 application. The user is looking at a map of live AIS traffic; you have tools \
@@ -147,6 +185,13 @@ COVERAGE — the app currently tracks the UK / English Channel (AISStream), the 
 Baltic and Finnish waters (Digitraffic), and the Norwegian coast (Kystverket). \
 Only vessels currently transmitting inside that coverage are visible. If asked \
 about somewhere else, say it's outside coverage.
+
+EYES ON LAND — when camera tools are available you can literally look at London \
+road traffic: find_cameras locates TfL junction cameras, view_camera runs vision \
+on one's live snapshot. Use them for questions about London roads, congestion or \
+conditions at a place. The feed is a low-resolution snapshot refreshed every few \
+minutes: report reads as indicative ("looks heavy right now"), counts as \
+approximate, and never claim to identify a specific vehicle or person.
 
 RULES
 1. Ground every claim in tool results from THIS conversation. Never invent \
@@ -200,6 +245,27 @@ def _mmsis_in(result) -> set[int]:
     return out
 
 
+def _camera_peek(tool_name: str, result: Any) -> dict | None:
+    """A `camera` SSE event for the chat UI when the analyst looked through a
+    camera — carries the snapshot URL so the panel can show the actual frame."""
+    if tool_name != "view_camera" or not isinstance(result, dict):
+        return None
+    cam = result.get("camera")
+    if not isinstance(cam, dict) or not cam.get("image"):
+        return None
+    analysis = result.get("analysis") or {}
+    return {
+        "type": "camera",
+        "camera": {
+            "id": cam.get("id"),
+            "name": cam.get("name"),
+            "image": cam.get("image"),
+            "view": cam.get("view"),
+        },
+        "congestion": analysis.get("congestion"),
+    }
+
+
 class AnalystService:
     """Claude tool loop over callables supplied by the app (no direct app deps)."""
 
@@ -216,6 +282,8 @@ class AnalystService:
         events: Callable[[float], list[dict]],
         conditions: Callable[[float, float], Awaitable[dict | None]],
         flagged: Callable[[], Awaitable[set[int]]],
+        cameras: Callable[[], Awaitable[list[dict]]] | None = None,
+        camera_view: Callable[[str], Awaitable[dict]] | None = None,
     ) -> None:
         self._model = model
         self._api_key = api_key or None
@@ -228,6 +296,15 @@ class AnalystService:
         self._events = events
         self._conditions = conditions
         self._flagged = flagged
+        self._cameras = cameras
+        self._camera_view = camera_view
+
+    def _tools(self) -> list[dict]:
+        """The tool set for this deployment — camera tools only when the land
+        camera feed is wired in."""
+        if self._cameras and self._camera_view:
+            return TOOLS + CAMERA_TOOLS
+        return TOOLS
 
     def _ensure_client(self) -> anthropic.AsyncAnthropic:
         if self._client is None:
@@ -328,6 +405,25 @@ class AnalystService:
         c = await self._conditions(float(p["lat"]), float(p["lon"]))
         return c or {"error": "no forecast available"}
 
+    async def _find_cameras(self, p: dict) -> dict:
+        cams = await self._cameras()  # type: ignore[misc]
+        q = (p.get("query") or "").strip().lower()
+        out = [
+            c for c in cams
+            if c.get("available") and (not q or q in (c.get("name") or "").lower())
+        ]
+        lat, lon = p.get("lat"), p.get("lon")
+        if lat is not None and lon is not None:
+            out.sort(key=lambda c: (c["lat"] - lat) ** 2 + (c["lon"] - lon) ** 2)
+        limit = max(1, min(int(p.get("limit") or 8), 15))
+        return {
+            "total_matching": len(out),
+            "cameras": [
+                {"id": c["id"], "name": c["name"], "lat": c["lat"], "lon": c["lon"], "view": c["view"]}
+                for c in out[:limit]
+            ],
+        }
+
     async def _run_tool(self, name: str, p: dict) -> Any:
         if name == "query_vessels":
             return await self._query_vessels(p)
@@ -337,6 +433,10 @@ class AnalystService:
             return await self._recent_events(p)
         if name == "weather_at":
             return await self._weather_at(p)
+        if name == "find_cameras" and self._cameras:
+            return await self._find_cameras(p)
+        if name == "view_camera" and self._camera_view:
+            return await self._camera_view(str(p["camera_id"]))
         if name == "show_on_map":
             return {"ok": True}
         return {"error": f"unknown tool {name}"}
@@ -357,6 +457,15 @@ class AnalystService:
             return f"Checked recent risk events · {n} found"
         if name == "weather_at":
             return "Checked sea conditions"
+        if name == "find_cameras":
+            n = result.get("total_matching", "?") if isinstance(result, dict) else "?"
+            return f"Found {n} traffic camera{'s' if n != 1 else ''}"
+        if name == "view_camera":
+            cam = (result or {}).get("camera", {}) if isinstance(result, dict) else {}
+            an = (result or {}).get("analysis", {}) if isinstance(result, dict) else {}
+            where = cam.get("name") or "camera"
+            cong = an.get("congestion")
+            return f"Viewed {where}" + (f" · {cong}" if cong else "")
         if name == "show_on_map":
             n = len(p.get("mmsis") or [])
             return f"Highlighted {n} vessel{'s' if n != 1 else ''} on the map" if n else "Moved the map"
@@ -396,7 +505,7 @@ class AnalystService:
         contents.append(
             types.Content(role="user", parts=[types.Part(text=f"[time now: {now}]\n{question}")])
         )
-        tools = make_tools(TOOLS)
+        tools = make_tools(self._tools())
 
         cost = 0.0
         cited: set[int] = set()
@@ -442,6 +551,9 @@ class AnalystService:
                         out = await self._run_tool(fc.name, args)
                         known |= _mmsis_in(out)
                         yield {"type": "tool", "label": self._trace_label(fc.name, args, out)}
+                        peek = _camera_peek(fc.name, out)
+                        if peek:
+                            yield peek
                     resp_parts.append(
                         types.Part.from_function_response(name=fc.name, response={"result": out})
                     )
@@ -481,7 +593,7 @@ class AnalystService:
                             "cache_control": {"type": "ephemeral"},
                         }
                     ],
-                    tools=TOOLS,
+                    tools=self._tools(),
                     messages=msgs,
                 ) as s:
                     async for ev in s:
@@ -506,6 +618,9 @@ class AnalystService:
                 for tu in tool_uses:
                     out = await self._run_tool(tu.name, tu.input or {})
                     yield {"type": "tool", "label": self._trace_label(tu.name, tu.input or {}, out)}
+                    peek = _camera_peek(tu.name, out)
+                    if peek:
+                        yield peek
                     if tu.name == "show_on_map":
                         p = tu.input or {}
                         mmsis = [int(m) for m in (p.get("mmsis") or [])]

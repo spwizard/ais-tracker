@@ -316,6 +316,26 @@ async def lifespan(app: FastAPI):
         gemini_search_model=settings.gemini_search_model,
     )
 
+    # Analyst eyes: look through a TfL camera — vision analysis of its snapshot.
+    async def _analyst_camera_view(cam_id: str) -> dict:
+        cams = await app.state.cameras.list()
+        cam = next((c for c in cams if c["id"] == cam_id), None)
+        if cam is None:
+            return {"error": "unknown camera id — use find_cameras first"}
+        if not cam.get("available"):
+            return {"error": "camera offline"}
+        try:
+            analysis = await app.state.camera_analyst.analyze(cam["image"])
+        except Exception as exc:  # noqa: BLE001 — surface as a tool error, not a 500
+            return {"error": f"vision analysis failed: {exc}"}
+        return {
+            "camera": {
+                "id": cam["id"], "name": cam["name"], "view": cam["view"],
+                "lat": cam["lat"], "lon": cam["lon"], "image": cam["image"],
+            },
+            "analysis": analysis.model_dump(),
+        }
+
     # AI analyst — conversational tool loop over everything above.
     app.state.analyst = AnalystService(
         settings.analyst_model,
@@ -328,6 +348,8 @@ async def lifespan(app: FastAPI):
         events=app.state.risk_engine.recent_events,
         conditions=app.state.windy.forecast,
         flagged=app.state.risk_engine.flagged_set,
+        cameras=app.state.cameras.list if app.state.cameras else None,
+        camera_view=_analyst_camera_view if app.state.cameras else None,
     )
     log.info("LLM provider: %s", settings.llm_provider)
 

@@ -7,11 +7,46 @@ import {
   CheckCircle2,
   Loader2,
   TriangleAlert,
+  Maximize2,
 } from "lucide-react";
 import { FloatingPanel, type PanelChrome } from "@/components/FloatingPanel";
 import { Hint } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import type { AnalystMessage } from "@/hooks/useAnalyst";
+import type { AnalystMessage, CameraPeek } from "@/hooks/useAnalyst";
+
+/** Thumbnail cards for the cameras the analyst looked through — the actual
+ *  frames behind its answer. Click one to open the full camera view. */
+function CameraPeeks({
+  cams,
+  onOpen,
+}: {
+  cams: CameraPeek[];
+  onOpen?: (id: string) => void;
+}) {
+  return (
+    <div className={cn("mb-2 grid gap-1.5", cams.length > 1 ? "grid-cols-2" : "grid-cols-1")}>
+      {cams.map((c, i) => (
+        <button
+          key={`${c.id}-${i}`}
+          onClick={() => onOpen?.(c.id)}
+          className="group relative aspect-video overflow-hidden rounded-lg border border-foreground/10 bg-black text-left animate-fade-in"
+          title={c.name ?? "Traffic camera"}
+        >
+          <img src={c.image} alt={c.name ?? "Traffic camera"} className="h-full w-full object-cover" />
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end gap-1 bg-gradient-to-t from-black/80 to-transparent px-1.5 pb-1 pt-4 text-[9px] font-medium text-white">
+            <span className="min-w-0 flex-1 truncate">{c.name ?? "Camera"}</span>
+            {c.congestion && (
+              <span className="shrink-0 rounded bg-white/20 px-1 uppercase">{c.congestion}</span>
+            )}
+          </div>
+          <div className="absolute right-1 top-1 grid h-5 w-5 place-items-center rounded bg-black/50 text-white opacity-0 transition-opacity group-hover:opacity-100">
+            <Maximize2 className="h-3 w-3" />
+          </div>
+        </button>
+      ))}
+    </div>
+  );
+}
 
 const SUGGESTIONS = [
   "Anything suspicious right now?",
@@ -217,6 +252,7 @@ export function AnalystPanel({
   onStop,
   onClear,
   onVessel,
+  onOpenCamera,
 }: {
   chrome: PanelChrome;
   messages: AnalystMessage[];
@@ -225,6 +261,8 @@ export function AnalystPanel({
   onStop: () => void;
   onClear: () => void;
   onVessel: (mmsi: number) => void;
+  /** Open the full camera view for a feed the analyst looked through. */
+  onOpenCamera?: (id: string) => void;
 }) {
   const [draft, setDraft] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -307,6 +345,9 @@ export function AnalystPanel({
                     return (
                   <div key={i} className="max-w-full">
                     <ToolTrace tools={m.tools} pending={!!m.pending && !body} />
+                    {(m.cameras?.length ?? 0) > 0 && (
+                      <CameraPeeks cams={m.cameras} onOpen={onOpenCamera} />
+                    )}
                     {body ? (
                       <Prose text={body} onVessel={onVessel} />
                     ) : m.pending ? (

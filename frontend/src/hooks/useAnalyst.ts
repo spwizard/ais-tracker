@@ -10,11 +10,21 @@ export interface MapDirective {
   zoom?: number;
 }
 
+/** A camera the analyst looked through mid-answer (thumbnail card in the chat). */
+export interface CameraPeek {
+  id: string;
+  name: string | null;
+  image: string; // snapshot URL, cache-busted at event time
+  view: string | null;
+  congestion: string | null;
+}
+
 export interface AnalystMessage {
   role: "user" | "assistant";
   text: string; // committed answer
   draft: string; // current round's streaming text (dropped on `discard`)
   tools: string[]; // tool-trace labels, in order
+  cameras: CameraPeek[]; // cameras viewed while answering
   costUsd?: number;
   error?: string;
   pending?: boolean;
@@ -51,8 +61,8 @@ export function useAnalyst(onMap: (d: MapDirective) => void) {
 
       setMessages((prev) => [
         ...prev,
-        { role: "user", text: q, draft: "", tools: [] },
-        { role: "assistant", text: "", draft: "", tools: [], pending: true },
+        { role: "user", text: q, draft: "", tools: [], cameras: [] },
+        { role: "assistant", text: "", draft: "", tools: [], cameras: [], pending: true },
       ]);
       setBusy(true);
       const ac = new AbortController();
@@ -96,6 +106,18 @@ export function useAnalyst(onMap: (d: MapDirective) => void) {
               case "tool":
                 patchLast((m) => ({ ...m, tools: [...m.tools, ev.label as string] }));
                 break;
+              case "camera": {
+                const cam = ev.camera as CameraPeek;
+                // Cache-bust once, at event time, so the thumbnail is the frame
+                // the analyst actually saw (and doesn't refetch every render).
+                const peek: CameraPeek = {
+                  ...cam,
+                  image: `${cam.image}${cam.image.includes("?") ? "&" : "?"}_=${Date.now()}`,
+                  congestion: (ev.congestion as string) ?? null,
+                };
+                patchLast((m) => ({ ...m, cameras: [...m.cameras, peek] }));
+                break;
+              }
               case "map":
                 onMapRef.current(ev as MapDirective);
                 break;
