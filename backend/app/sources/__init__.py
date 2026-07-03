@@ -7,6 +7,7 @@ from __future__ import annotations
 from ..config import Settings
 from ..store.base import VesselStore
 from .adsblol import AdsbLolSource
+from .bods import BodsSource
 from .aisstream import AisStreamSource
 from .base import Source
 from .digitraffic import DigitrafficSource
@@ -37,4 +38,6 @@ __all__ = [
     # Aircraft (ADS-B) source — built in the app lifespan, not create_sources,
     # since it writes into the separate AircraftStore.
     "AdsbLolSource",
+    # Bus (BODS SIRI-VM) source — same story, writes into the BusStore.
+    "BodsSource",
 ]

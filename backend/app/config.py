@@ -58,6 +58,17 @@ class Settings(BaseSettings):
     def air_regions(self) -> list[tuple[float, float, int]]:
         return [tuple(r) for r in json.loads(self.air_regions_raw)]
 
+    # --- Land: London buses (Bus Open Data Service SIRI-VM — free, needs key) --
+    enable_bus: bool = Field(default=False, alias="ENABLE_BUS")
+    bods_api_key: str = Field(default="", alias="BODS_API_KEY")
+    bods_url: str = Field(
+        default="https://data.bus-data.dft.gov.uk/api/v1", alias="BODS_URL"
+    )
+    # Poll region as minLon,minLat,maxLon,maxLat — defaults to Greater London.
+    bus_bbox: str = Field(default="-0.53,51.28,0.30,51.70", alias="BUS_BBOX")
+    bus_poll_sec: float = Field(default=12.0, alias="BUS_POLL_SEC")
+    bus_ttl_sec: int = Field(default=60, alias="BUS_TTL_SEC")
+
     # --- Land: London traffic cameras (TfL JamCams — free, keyless) --------
     enable_cameras: bool = Field(default=True, alias="ENABLE_CAMERAS")
     tfl_jamcam_url: str = Field(

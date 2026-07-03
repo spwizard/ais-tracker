@@ -53,9 +53,10 @@ from .ship_types import SHIP_TYPE_GROUPS
 from .air.enrich import AircraftEnricher
 from .land.cameras import CameraCatalog
 from .land.vision import CameraAnalyst, VisionUnavailable
-from .sources import AdsbLolSource, create_sources
+from .sources import AdsbLolSource, BodsSource, create_sources
 from .store import create_store
 from .store.aircraft import AircraftStore
+from .store.bus import BusStore
 from .ws.broadcaster import Broadcaster
 
 logging.basicConfig(
@@ -202,6 +203,11 @@ async def lifespan(app: FastAPI):
     if air_store is not None:
         await air_store.start()
     app.state.air_store = air_store
+    # Land domain: London buses (BODS SIRI-VM), fanned out on the same socket.
+    bus_store = BusStore() if settings.enable_bus else None
+    if bus_store is not None:
+        await bus_store.start()
+    app.state.bus_store = bus_store
     # Aircraft enrichment (registration / operator / route / photo) via adsbdb.
     app.state.air_enricher = AircraftEnricher() if settings.enable_air else None
     # Land domain: London traffic cameras (TfL JamCams), lazily fetched + cached.
@@ -217,7 +223,9 @@ async def lifespan(app: FastAPI):
         else None
     )
 
-    broadcaster = Broadcaster(store, settings.broadcast_hz, air_store=air_store)
+    broadcaster = Broadcaster(
+        store, settings.broadcast_hz, air_store=air_store, bus_store=bus_store
+    )
     broadcaster.start()
     app.state.broadcaster = broadcaster
 
@@ -243,6 +251,8 @@ async def lifespan(app: FastAPI):
     # supervisor rails, so it lives alongside the vessel sources.
     if air_store is not None:
         sources.append(AdsbLolSource(air_store, settings))
+    if bus_store is not None:
+        sources.append(BodsSource(bus_store, settings))
     for src in sources:
         src.start()
     app.state.sources = sources
@@ -388,6 +398,8 @@ async def lifespan(app: FastAPI):
         await store.close()
         if air_store is not None:
             await air_store.close()
+        if bus_store is not None:
+            await bus_store.close()
         if app.state.air_enricher is not None:
             await app.state.air_enricher.close()
         if app.state.cameras is not None:
@@ -429,6 +441,7 @@ async def healthz():
         "sources": [_source_status(s) for s in app.state.sources],
         "vessels": await app.state.store.count(),
         "aircraft": await app.state.air_store.count() if app.state.air_store else 0,
+        "buses": await app.state.bus_store.count() if app.state.bus_store else 0,
         "clients": app.state.broadcaster.client_count,
         "registry": app.state.registry.count() if app.state.registry else 0,
         "data": {
@@ -447,6 +460,8 @@ async def feature_flags():
     flags["google_3d"] = bool(app.state.settings.google_maps_key)
     # Air-traffic layer available only when the ADS-B feed is enabled server-side.
     flags["air"] = bool(app.state.settings.enable_air)
+    # London buses available when the BODS feed is enabled + keyed server-side.
+    flags["bus"] = bool(app.state.settings.enable_bus and app.state.settings.bods_api_key)
     # London traffic cameras available when the TfL feed is enabled server-side.
     flags["cameras"] = bool(app.state.settings.enable_cameras)
     return {"flags": flags}

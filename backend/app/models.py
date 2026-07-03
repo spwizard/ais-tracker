@@ -106,3 +106,21 @@ class Aircraft(BaseModel):
     squawk: Optional[str] = None  # transponder code (7500/7600/7700 = emergencies)
 
     ts: float = 0.0  # last update (epoch seconds)
+
+
+class Bus(BaseModel):
+    """Full current state for one bus — the land-domain analogue of ``Vessel``.
+
+    Sourced from the Bus Open Data Service (SIRI-VM). Each poll is a complete
+    snapshot, so no partial-merge. Keyed by ``id`` (the operator's vehicle ref).
+    """
+
+    id: str  # "{operator}:{vehicleRef}" — the stable key
+    route: Optional[str] = None  # published line name, e.g. "24" / "N5"
+    destination: Optional[str] = None
+    operator: Optional[str] = None  # operator ref, e.g. "TFLO" (TfL)
+    lat: Optional[float] = None
+    lon: Optional[float] = None
+    bearing: Optional[float] = None  # degrees clockwise from north
+
+    ts: float = 0.0  # last update (epoch seconds)

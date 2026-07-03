@@ -28,16 +28,18 @@ _ALERT_FRAMES = ("geofence_event", "risk_event")
 
 
 class Broadcaster:
-    def __init__(self, store, hz: float, air_store=None) -> None:
+    def __init__(self, store, hz: float, air_store=None, bus_store=None) -> None:
         self._store = store
         self._air_store = air_store  # optional AircraftStore (ADS-B domain)
+        self._bus_store = bus_store  # optional BusStore (land domain)
         self._interval = 1.0 / max(hz, 0.1)
         self._clients: set[WebSocket] = set()
         self._task: asyncio.Task | None = None
         self._stop = asyncio.Event()
-        # Track what each vessel/aircraft looked like last tick to send only changes.
+        # Track what each entity looked like last tick to send only changes.
         self._last_sent: dict[int, float] = {}  # mmsi -> ts last broadcast
         self._last_sent_air: dict[str, float] = {}  # hex -> ts last broadcast
+        self._last_sent_bus: dict[str, float] = {}  # bus id -> ts last broadcast
         # Optional sink that persists alert frames (set by the app).
         self.alert_sink: Callable[[dict], None] | None = None
 
@@ -69,6 +71,11 @@ class Broadcaster:
             await ws.send_json(
                 {"type": "air_snapshot", "aircraft": [a.model_dump() for a in aircraft]}
             )
+        if self._bus_store is not None:
+            buses = await self._bus_store.snapshot()
+            await ws.send_json(
+                {"type": "bus_snapshot", "buses": [b.model_dump() for b in buses]}
+            )
 
     def disconnect(self, ws: WebSocket) -> None:
         self._clients.discard(ws)
@@ -92,6 +99,8 @@ class Broadcaster:
         await self._tick_vessels()
         if self._air_store is not None:
             await self._tick_aircraft()
+        if self._bus_store is not None:
+            await self._tick_buses()
 
     async def _tick_vessels(self) -> None:
         vessels = await self._store.snapshot()
@@ -135,6 +144,29 @@ class Broadcaster:
             {
                 "type": "air_update",
                 "aircraft": [a.model_dump() for a in changed],
+                "removed": removed,
+            }
+        )
+
+    async def _tick_buses(self) -> None:
+        buses = await self._bus_store.snapshot()
+        current_ids = {b.id for b in buses}
+
+        changed = [b for b in buses if self._last_sent_bus.get(b.id) != b.ts]
+        removed = [i for i in self._last_sent_bus if i not in current_ids]
+
+        for b in buses:
+            self._last_sent_bus[b.id] = b.ts
+        for i in removed:
+            self._last_sent_bus.pop(i, None)
+
+        if not changed and not removed:
+            return
+
+        await self._broadcast(
+            {
+                "type": "bus_update",
+                "buses": [b.model_dump() for b in changed],
                 "removed": removed,
             }
         )
