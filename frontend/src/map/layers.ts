@@ -9,25 +9,55 @@ import type { TrailPoint } from "@/hooks/useVesselTrail";
 import { colorRgbFor, groupKeyFor } from "@/lib/shipTypes";
 import { getIconAtlas, ICON_MAPPING } from "./vesselIcons";
 
-// 3D vessel models, keyed by ship-type group. A group without an entry keeps
-// its flat icon. Drop a `<group>.glb` into public/models and add it here.
+// 3D vessel models, bucketed Unity-chart-style (see geovs-chart's
+// target_categories.cfg / size_scale.cfg): a vessel is classified by ship-type
+// PLUS its real AIS length into a size class, each class has its own hull
+// model, and every vessel is then scaled to its own length. Buckets are ordered
+// most-specific-first; the FIRST match wins. Vessels with no AIS dimensions
+// fall into the small bucket at a modest default — the same visual outcome as
+// the chart app's DEFAULT_LENGTH.
 interface VesselModel {
+  key: string; // layer id suffix
   url: string;
   yawOffset: number; // degrees, to correct the model's forward (bow) axis
+  meshLen: number; // native mesh length in glTF units (measured)
+  defaultLen: number; // rendered metres when the vessel's AIS length is unknown
+  match: (d: TrackedVessel) => boolean;
 }
-const MODEL_REGISTRY: Partial<Record<string, VesselModel>> = {
-  fishing: { url: "/models/fishing.glb", yawOffset: -90 },
-  passenger: { url: "/models/passenger.glb", yawOffset: 0 },
-};
-const MODEL_GROUPS = new Set(Object.keys(MODEL_REGISTRY));
+const MODEL_BUCKETS: VesselModel[] = [
+  { key: "fishing", url: "/models/fishing.glb", yawOffset: -90, meshLen: 2, defaultLen: 28,
+    match: (d) => groupKeyFor(d.ship_type) === "fishing" },
+  { key: "passenger", url: "/models/passenger.glb", yawOffset: 0, meshLen: 2, defaultLen: 100,
+    match: (d) => groupKeyFor(d.ship_type) === "passenger" },
+  // AIS type 36 (sailing) only — motor pleasure craft (37) keep their icon.
+  { key: "sailing-xl", url: "/models/sailing-xl.glb", yawOffset: 0, meshLen: 5.61, defaultLen: 14,
+    match: (d) => d.ship_type === 36 },
+  { key: "cargo-s", url: "/models/cargo-s.glb", yawOffset: 0, meshLen: 9.93, defaultLen: 70,
+    match: (d) => groupKeyFor(d.ship_type) === "cargo" && (d.length == null || d.length <= 100) },
+  { key: "cargo-l", url: "/models/cargo-l.glb", yawOffset: 0, meshLen: 29.9, defaultLen: 200,
+    match: (d) => groupKeyFor(d.ship_type) === "cargo" },
+  { key: "tanker-s", url: "/models/tanker-s.glb", yawOffset: 0, meshLen: 14.86, defaultLen: 90,
+    match: (d) => groupKeyFor(d.ship_type) === "tanker" && (d.length == null || d.length <= 150) },
+  { key: "tanker-xl", url: "/models/tanker-xl.glb", yawOffset: 0, meshLen: 32.02, defaultLen: 250,
+    match: (d) => groupKeyFor(d.ship_type) === "tanker" },
+];
+/** First matching bucket, or null → the vessel keeps its flat icon. */
+function bucketFor(d: TrackedVessel): VesselModel | null {
+  for (const b of MODEL_BUCKETS) if (b.match(d)) return b;
+  return null;
+}
 
 const MODEL_MIN_ZOOM = 11.5; // below this, the flat icon is used
-// Sized by pixel bounds so the model is visible regardless of its native units.
-// Capped fairly small so the models stay in scale with the map's buildings when
-// zoomed right in (3D), rather than dwarfing them.
-const MODEL_SIZE_SCALE = 110;
-const MODEL_MIN_PX = 24;
-const MODEL_MAX_PX = 72;
+// World-scaled: a small pixel floor keeps ships visible when zoomed out, and a
+// huge ceiling lets them reach true metre-size as you zoom in (Google-Earth
+// style) rather than staying a fixed marker.
+//
+// NB deck's sizeMinPixels clamps ONE SCENEGRAPH UNIT, not the whole model — so
+// the floor must be divided by each mesh's native length, or a 32-unit tanker
+// gets a 16× larger minimum than a 2-unit fishing boat and looks giant the
+// moment models switch on.
+const MODEL_MIN_SHIP_PX = 12; // minimum rendered *ship length* in pixels
+const MODEL_MAX_PX = 10000;
 // Hard ceiling on simultaneously-rendered 3D models (across all groups). Each is
 // a full GLTF mesh; beyond a few hundred the frame rate tanks. Vessels past this
 // fall back to their flat icon, so nothing disappears — it just isn't 3D.
@@ -146,7 +176,7 @@ function selectModelShips(
 ): TrackedVessel[] {
   let inView = data.filter(
     (d) =>
-      d.lat != null && d.lon != null && MODEL_GROUPS.has(groupKeyFor(d.ship_type)),
+      d.lat != null && d.lon != null && bucketFor(d) != null,
   );
   if (cullBounds) {
     const [w, s, e, n] = cullBounds;
@@ -275,7 +305,7 @@ export function buildLayers(opts: LayerOptions) {
   // 3D models replace flat icons for fishing vessels when zoomed in.
   const modelsActive = !densityMode && !history && zoom >= MODEL_MIN_ZOOM;
   const isModelVessel = (d: TrackedVessel) =>
-    modelsActive && MODEL_GROUPS.has(groupKeyFor(d.ship_type));
+    modelsActive && bucketFor(d) != null;
 
   // Vessels actually drawn as 3D models this frame — culled to the (padded)
   // viewport and capped to the nearest MODEL_MAX_INSTANCES. Computed once so the
@@ -454,7 +484,7 @@ export function buildLayers(opts: LayerOptions) {
           id: "analyst-rings",
           data: cited,
           getPosition: (d) =>
-            deadReckon(d.lat as number, d.lon as number, d.cog, d.sog, currentTime - d.ts),
+            deadReckon(d.lat as number, d.lon as number, d.cog, d.sog, currentTime - d.ts, DR_SCRATCH),
           stroked: true,
           filled: false,
           getLineColor: [34, 211, 238, Math.round(170 + breathe * 85)],
@@ -480,7 +510,7 @@ export function buildLayers(opts: LayerOptions) {
           id: "hover-ring",
           data: [hv],
           getPosition: (d) =>
-            deadReckon(d.lat as number, d.lon as number, d.cog, d.sog, currentTime - d.ts),
+            deadReckon(d.lat as number, d.lon as number, d.cog, d.sog, currentTime - d.ts, DR_SCRATCH),
           stroked: true,
           filled: false,
           getLineColor: [255, 255, 255, 235],
@@ -507,7 +537,7 @@ export function buildLayers(opts: LayerOptions) {
           id: "flagged-rings",
           data: flagged,
           getPosition: (d) =>
-            deadReckon(d.lat as number, d.lon as number, d.cog, d.sog, currentTime - d.ts),
+            deadReckon(d.lat as number, d.lon as number, d.cog, d.sog, currentTime - d.ts, DR_SCRATCH),
           stroked: true,
           filled: false,
           getLineColor: [244, 63, 94, Math.round(150 + pulse * 105)],
@@ -535,7 +565,7 @@ export function buildLayers(opts: LayerOptions) {
       // Dead-reckon the position forward from the last fix so vessels glide
       // continuously between (infrequent) AIS updates instead of jumping.
       getPosition: (d) =>
-        deadReckon(d.lat as number, d.lon as number, d.cog, d.sog, currentTime - d.ts),
+        deadReckon(d.lat as number, d.lon as number, d.cog, d.sog, currentTime - d.ts, DR_SCRATCH),
       // IconLayer angle is counter-clockwise; AIS heading is clockwise-from-north.
       getAngle: (d) => -(d.heading ?? d.cog ?? 0),
       getColor: (d) => colorRgbFor(d.ship_type),
@@ -555,35 +585,56 @@ export function buildLayers(opts: LayerOptions) {
     }),
   );
 
-  // 3D models when zoomed in — one shared, GPU-instanced layer per ship group.
+  // 3D models when zoomed in — one shared, GPU-instanced layer per size bucket.
   // `modelShips` is already culled to the viewport and capped (computed up front
   // so the flat-icon layer can show whatever didn't get a model).
   if (modelsActive) {
-    for (const [group, model] of Object.entries(MODEL_REGISTRY)) {
-      if (!model) continue;
-      const ships = modelShips.filter((d) => groupKeyFor(d.ship_type) === group);
-      if (ships.length === 0) continue;
+    // First-match bucket assignment (a ≤100m cargo must land in cargo-s, not
+    // the cargo-l catch-all).
+    const byBucket = new Map<string, TrackedVessel[]>();
+    for (const d of modelShips) {
+      const b = bucketFor(d);
+      if (!b) continue;
+      const arr = byBucket.get(b.key);
+      if (arr) arr.push(d);
+      else byBucket.set(b.key, [d]);
+    }
+    for (const model of MODEL_BUCKETS) {
+      const ships = byBucket.get(model.key);
+      if (!ships || ships.length === 0) continue;
+      // Each vessel renders at ITS OWN AIS length (like the chart app's
+      // antenna-derived dimensions): sizeScale maps the mesh to the bucket's
+      // base length, and getScale fine-tunes per vessel. The ±2× clamp bounds
+      // both junk AIS dimensions and the pixel-floor distortion.
+      const base = model.defaultLen;
       layers.push(
         new ScenegraphLayer<TrackedVessel>({
-          id: `vessel-models-${group}`,
+          id: `vessel-models-${model.key}`,
           data: ships,
           scenegraph: model.url,
           loaders: [GLTFLoader],
+          // Most models are Draco-compressed; decoding is a no-op for the rest.
+          loadOptions: { gltf: { decompressMeshes: true } },
           _lighting: "pbr",
           pickable: !drawing,
-          sizeScale: MODEL_SIZE_SCALE,
-          sizeMinPixels: MODEL_MIN_PX,
+          sizeScale: base / model.meshLen,
+          sizeMinPixels: MODEL_MIN_SHIP_PX / model.meshLen,
           sizeMaxPixels: MODEL_MAX_PX,
           getPosition: (d) => {
             const [lon, lat] = deadReckon(
-              d.lat as number, d.lon as number, d.cog, d.sog, currentTime - d.ts,
+              d.lat as number, d.lon as number, d.cog, d.sog, currentTime - d.ts, DR_SCRATCH,
             );
             return [lon, lat, modelElevation];
+          },
+          getScale: (d) => {
+            const k = Math.min(2, Math.max(0.5, (d.length ?? base) / base));
+            return [k, k, k];
           },
           getOrientation: (d) => [0, -facingAngle(d) + model.yawOffset, 90],
           onClick: (info) => onClick((info.object as TrackedVessel) ?? null),
           updateTriggers: {
             getPosition: [currentTime, modelElevation],
+            getScale: version, // AIS dimensions can arrive late via static data
             getOrientation: [version, currentTime],
           },
         }),
@@ -606,18 +657,27 @@ const MAX_DR_SEC = 150;
  * Project a position forward along the vessel's course at its speed.
  * Returns [lon, lat]. Stationary/unknown-course vessels stay put.
  * Also used by the aircraft layer (track/ground-speed share these units).
+ *
+ * Pass `out` to reuse an array instead of allocating. deck.gl accessors copy the
+ * returned values into typed attribute buffers synchronously, so hot per-item
+ * accessors share one scratch array (DR_SCRATCH) — this path runs tens of
+ * thousands of times per clock tick, and allocating there dominated GC churn.
+ * Do NOT pass the scratch anywhere the result is retained (paths, layer data).
  */
+export const DR_SCRATCH: [number, number] = [0, 0];
+
 export function deadReckon(
   lat: number,
   lon: number,
   cog: number | null,
   sog: number | null,
   dtSec: number,
+  out?: [number, number],
 ): [number, number] {
-  if (cog == null || sog == null || sog < 0.2) return [lon, lat];
+  if (cog == null || sog == null || sog < 0.2) return write(out, lon, lat);
   const t = Math.min(Math.max(dtSec, 0), MAX_DR_SEC);
   const dist = sog * KNOTS_TO_MS * t; // metres travelled
-  if (dist < 0.5) return [lon, lat];
+  if (dist < 0.5) return write(out, lon, lat);
 
   const ang = dist / EARTH_R; // angular distance
   const brng = (cog * Math.PI) / 180;
@@ -636,5 +696,12 @@ export function deadReckon(
       cosAng - sinLat1 * Math.sin(lat2),
     );
 
-  return [(lon2 * 180) / Math.PI, (lat2 * 180) / Math.PI];
+  return write(out, (lon2 * 180) / Math.PI, (lat2 * 180) / Math.PI);
+}
+
+function write(out: [number, number] | undefined, lon: number, lat: number): [number, number] {
+  if (!out) return [lon, lat];
+  out[0] = lon;
+  out[1] = lat;
+  return out;
 }
