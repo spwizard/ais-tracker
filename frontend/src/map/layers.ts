@@ -650,8 +650,11 @@ export function buildLayers(opts: LayerOptions) {
 const KNOTS_TO_MS = 0.514444;
 const EARTH_R = 6_371_000; // metres
 // Cap how far ahead we speculate from a stale fix, so a vessel that has gone
-// quiet doesn't drift unrealistically across the map.
-const MAX_DR_SEC = 150;
+// quiet doesn't drift unrealistically across the map. 60s: straight-line
+// projection is only trustworthy for about a minute on winding waters — at
+// 150s a Thames clipper that went dark at 10kn rendered ~780m inland, sailing
+// up Byward Street. Past the cap the vessel holds that projected position.
+const MAX_DR_SEC = 60;
 
 /**
  * Project a position forward along the vessel's course at its speed.
