@@ -8,7 +8,7 @@
 import { IconLayer, ScatterplotLayer, TextLayer } from "@deck.gl/layers";
 import { GreatCircleLayer } from "@deck.gl/geo-layers";
 import type { TrackedAircraft } from "@/types";
-import { deadReckon } from "./layers";
+import { deadReckon, DR_SCRATCH } from "./layers";
 import { getAircraftIconAtlas, AIRCRAFT_ICON_MAPPING } from "./aircraftIcons";
 
 /** The selected aircraft's origin → destination airports, for the map overlay. */
@@ -70,7 +70,7 @@ export function buildAircraftLayers(opts: AircraftLayerOptions) {
       // On the ground or without a track → a dot; airborne → the plane glyph.
       getIcon: (d) => (d.on_ground || d.track == null ? "dot" : "plane"),
       getPosition: (d) =>
-        deadReckon(d.lat as number, d.lon as number, d.track, d.gs, currentTime - d.ts),
+        deadReckon(d.lat as number, d.lon as number, d.track, d.gs, currentTime - d.ts, DR_SCRATCH),
       // IconLayer angle is counter-clockwise; ADS-B track is clockwise-from-north.
       getAngle: (d) => -(d.track ?? 0),
       getColor: (d) => altColor(d.alt_baro),

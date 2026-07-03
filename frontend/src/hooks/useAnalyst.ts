@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
@@ -135,6 +135,10 @@ export function useAnalyst(onMap: (d: MapDirective) => void) {
     abortRef.current?.abort();
     setMessages([]);
   }, []);
+
+  // Abort any in-flight stream on unmount (currently app-lifetime, but this
+  // keeps it safe if the hook ever moves into a conditionally-rendered panel).
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   return { messages, busy, send, stop, clear };
 }

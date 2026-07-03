@@ -77,6 +77,13 @@ export function AlertToasts({
         fresh.push({ key: a.key, alert: a });
       }
     }
+    // Bound the de-dupe set: drop the oldest keys (Sets iterate in insertion
+    // order) so a long session doesn't retain every alert key ever toasted.
+    while (seen.current.size > 500) {
+      const oldest = seen.current.values().next().value;
+      if (oldest == null) break;
+      seen.current.delete(oldest);
+    }
     if (fresh.length === 0) return;
     setToasts((prev) => [...fresh, ...prev].slice(0, MAX_VISIBLE));
     fresh.forEach(({ key }) => {

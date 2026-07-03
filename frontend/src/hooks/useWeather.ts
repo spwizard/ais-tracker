@@ -8,6 +8,12 @@ const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 // importing its internal type.
 type TextureData = Awaited<ReturnType<typeof loadTextureData>>;
 
+// Each decoded raster is a multi-MB typed array; scrubbing across the ~7
+// forecast steps (× wind and waves) used to retain them all until the next GFS
+// cycle. Keep only the most recent few — going back a step re-fetches, which is
+// fast, while the tab no longer accumulates hundreds of MB of textures.
+const CACHE_MAX = 3;
+
 export interface WeatherField {
   image: TextureData | null;
   meta: WeatherMeta | null; // bounds + imageUnscale for the displayed step
@@ -81,6 +87,9 @@ function useWeatherField(
     const meta: WeatherMeta = { bounds: resp.bounds, imageUnscale: step.imageUnscale };
     const cached = cache.current.get(key);
     if (cached) {
+      // Re-insert to refresh recency (Map iterates in insertion order).
+      cache.current.delete(key);
+      cache.current.set(key, cached);
       setFrame({ image: cached, meta });
       return;
     }
@@ -90,6 +99,12 @@ function useWeatherField(
       .then((image) => {
         if (!alive) return;
         cache.current.set(key, image);
+        // LRU: evict the oldest entries beyond the cap.
+        while (cache.current.size > CACHE_MAX) {
+          const oldest = cache.current.keys().next().value;
+          if (oldest == null) break;
+          cache.current.delete(oldest);
+        }
         setFrame({ image, meta });
       })
       .catch(() => void 0);

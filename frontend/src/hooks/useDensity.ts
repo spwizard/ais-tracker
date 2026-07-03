@@ -26,12 +26,23 @@ export function useDensity() {
 
   const fetchBucket = useCallback(async (b: number): Promise<DensityPoint[]> => {
     const hit = cache.current.get(b);
-    if (hit) return hit;
+    if (hit) {
+      // Refresh recency (Map iterates in insertion order).
+      cache.current.delete(b);
+      cache.current.set(b, hit);
+      return hit;
+    }
     const d = await fetch(`${API_URL}/api/density/${b}`)
       .then((r) => r.json())
       .catch(() => ({ points: [] }));
     const pts: DensityPoint[] = d.points ?? [];
     cache.current.set(b, pts);
+    // LRU: scrubbing a 24h timeline shouldn't retain every bucket forever.
+    while (cache.current.size > 20) {
+      const oldest = cache.current.keys().next().value;
+      if (oldest == null) break;
+      cache.current.delete(oldest);
+    }
     return pts;
   }, []);
 
