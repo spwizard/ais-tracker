@@ -18,9 +18,11 @@ import { assessRoute } from "@/lib/airRoute";
 import type { AirRoute } from "@/map/aircraftLayers";
 import { CameraView } from "@/panels/CameraView";
 import { CameraWall } from "@/panels/CameraWall";
+import { BusDetail } from "@/panels/BusDetail";
 import { useCameras } from "@/hooks/useCameras";
 import { useCameraWall } from "@/hooks/useCameraWall";
-import type { Camera } from "@/types";
+import { nearbyCameras, nextCameraAhead } from "@/lib/nearbyCameras";
+import type { Camera, TrackedBus } from "@/types";
 import { MapControls } from "@/panels/MapControls";
 import { ZonesPanel } from "@/panels/ZonesPanel";
 import { DrawToolbar } from "@/panels/DrawToolbar";
@@ -69,7 +71,7 @@ const SEARCH_API = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 const SEARCH_TRACK_COLOR: [number, number, number] = [180, 210, 255];
 
 export default function App() {
-  const { vesselsRef, aircraftRef, version, status, events, riskEvents, flagged, geofenceSync } =
+  const { vesselsRef, aircraftRef, busesRef, version, status, events, riskEvents, flagged, geofenceSync, setTrailGate } =
     useVesselsSocket();
   const { panels, setOpen, toggle, togglePin, move, focus, zIndexOf, autoPlace } =
     usePanels();
@@ -91,6 +93,17 @@ export default function App() {
   const camerasAvailable = useFlag("cameras");
   const [selectedCameraId, setSelectedCameraId] = useState<string | null>(null);
   const wall = useCameraWall(); // multi-feed camera wall (grid of up to 12)
+  const [showBus, setShowBus] = useState(false); // London buses layer
+  const busAvailable = useFlag("bus");
+  const [selectedBusId, setSelectedBusId] = useState<string | null>(null);
+  const [followBusId, setFollowBusId] = useState<string | null>(null);
+  const [wallBusFollow, setWallBusFollow] = useState<string | null>(null); // wall tracks this bus
+
+  // Only store aircraft/bus trails while their layer is on (memory).
+  useEffect(
+    () => setTrailGate({ air: showAir, bus: showBus }),
+    [showAir, showBus, setTrailGate],
+  );
   const [selectedMmsi, setSelectedMmsi] = useState<number | null>(null);
   const [networkMmsi, setNetworkMmsi] = useState<number | null>(null);
   const [selectedHex, setSelectedHex] = useState<string | null>(null); // selected aircraft
@@ -283,7 +296,9 @@ export default function App() {
       selectedAircraft && airDossier?.route
         ? assessRoute(selectedAircraft, airDossier.route)
         : { plausible: true, note: null },
-    [selectedAircraft, airDossier],
+    // `version`: entity records mutate in place, so identity alone won't change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selectedAircraft, airDossier, version],
   );
   // Origin → destination airports for the map overlay — only drawn when the
   // route is toggled on AND the live position actually supports it.
@@ -299,8 +314,71 @@ export default function App() {
     };
   }, [airDossier, showAircraftRoute, routeAssessment]);
 
-  // London traffic cameras (fetched once when the layer or the wall needs them).
-  const cameras = useCameras(showCameras || wall.open);
+  // London buses — materialized only while the layer is on, same version bump.
+  const buses = useMemo<TrackedBus[]>(() => {
+    if (!showBus) return [];
+    const out: TrackedBus[] = [];
+    for (const b of busesRef.current.values()) {
+      if (b.lat != null && b.lon != null) out.push(b);
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [version, busesRef, showBus]);
+  const selectedBus = useMemo(
+    () => (selectedBusId ? busesRef.current.get(selectedBusId) ?? null : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selectedBusId, version, busesRef],
+  );
+  // Follow mode: gently keep the followed bus in view as it moves.
+  useEffect(() => {
+    if (!followBusId) return;
+    const b = busesRef.current.get(followBusId);
+    if (b?.lat != null && b?.lon != null) mapRef.current?.panTo(b.lon, b.lat);
+  }, [version, followBusId, busesRef]);
+
+  // London traffic cameras — also fetched when a bus is selected (for fusion).
+  const cameras = useCameras(showCameras || wall.open || selectedBusId != null);
+  // Cameras nearest the selected bus, right now (recomputes as it moves).
+  const busNearby = useMemo(
+    () => (selectedBus ? nearbyCameras(selectedBus, cameras) : []),
+    // `version`: the bus record mutates in place as it moves.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selectedBus, cameras, version],
+  );
+  // The camera the selected bus is heading toward next (ahead in its bearing).
+  const nextCameraId = useMemo(
+    () => (selectedBus ? nextCameraAhead(selectedBus, busNearby) : null),
+    [selectedBus, busNearby],
+  );
+  const nextCameraPos = useMemo<[number, number] | null>(() => {
+    const c = nextCameraId ? cameras.find((x) => x.id === nextCameraId) : null;
+    return c ? [c.lon, c.lat] : null;
+  }, [nextCameraId, cameras]);
+  // Wall bus-follow: keep the wall showing the nearest cameras to a bus as it
+  // moves. Recompute on each version bump; only replace when the set changes.
+  const followedBus = wallBusFollow ? busesRef.current.get(wallBusFollow) ?? null : null;
+  // On the wall, badge the camera the followed bus is heading toward next.
+  const wallNextId = useMemo(
+    () =>
+      followedBus
+        ? nextCameraAhead(followedBus, nearbyCameras(followedBus, cameras, wall.max))
+        : null,
+    // `version`: the bus record mutates in place as it moves.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [followedBus, cameras, wall.max, version],
+  );
+  useEffect(() => {
+    if (!wallBusFollow || !wall.open) return;
+    const b = busesRef.current.get(wallBusFollow);
+    if (!b) return;
+    const ids = nearbyCameras(b, cameras, wall.max).map((c) => c.camera.id);
+    // Replace only when the SET changes (a camera enters/leaves) — not when the
+    // distance order merely shuffles, which would needlessly churn the tiles.
+    const cur = wall.ids;
+    const sameSet = ids.length === cur.length && ids.every((id) => cur.includes(id));
+    if (ids.length && !sameSet) wall.replace(ids);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [version, wallBusFollow, wall.open, cameras]);
   // Bulk-add the cameras currently in the map view (nearest the centre first).
   const addCamerasInView = useCallback(() => {
     const b = mapRef.current?.getBounds();
@@ -347,7 +425,9 @@ export default function App() {
   // while it passes the current filters — otherwise we'd leave an orphan track.
   const selectedVisible = useMemo(
     () => selected != null && matchesFilter(selected, filters),
-    [selected, filters],
+    // `version`: the vessel record mutates in place.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selected, filters, version],
   );
 
   // Backend history for the selected vessel, extended with live positions.
@@ -358,11 +438,15 @@ export default function App() {
     const lastTs = trackHistory[trackHistory.length - 1][2];
     const live = selected.trail.filter((p) => p[2] > lastTs);
     return [...trackHistory, ...live];
-  }, [trackHistory, selected]);
+    // `version`: the vessel record (and its trail) mutate in place.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trackHistory, selected, version]);
 
   const highlightColor = useMemo(
     () => colorRgbFor(selected?.ship_type ?? null),
-    [selected],
+    // `version`: ship_type can arrive late via static AIS data on the same record.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selected, version],
   );
 
   const zoomToTrack = () =>
@@ -560,6 +644,19 @@ export default function App() {
     }
   };
 
+  // Bus selection → the bus detail panel (follow is opt-in per selection).
+  const selectBus = (b: TrackedBus | null) => {
+    setSelectedBusId(b?.id ?? null);
+    setFollowBusId(null);
+    if (b) {
+      setOpen("bus", true);
+      autoPlace("bus");
+      focus("bus");
+    } else {
+      setOpen("bus", false);
+    }
+  };
+
   // Camera selection → the live camera view panel.
   const selectCamera = (c: Camera | null) => {
     setSelectedCameraId(c?.id ?? null);
@@ -704,6 +801,11 @@ export default function App() {
         showCameras={showCameras}
         onSelectCamera={selectCamera}
         selectedCameraId={selectedCameraId}
+        buses={buses}
+        showBus={showBus}
+        onSelectBus={selectBus}
+        selectedBusId={selectedBusId}
+        nextCameraPos={nextCameraPos}
       />
 
       {/* Floating UI — pointer-events re-enabled per element. */}
@@ -724,6 +826,7 @@ export default function App() {
             detail: panels.detail.open,
             aircraft: panels.aircraft.open,
             camera: panels.camera.open,
+            bus: panels.bus.open,
             zones: panels.zones.open,
             analyst: panels.analyst.open,
           }}
@@ -793,6 +896,9 @@ export default function App() {
             showAir={showAir}
             onToggleAir={setShowAir}
             airAvailable={airAvailable}
+            showBus={showBus}
+            onToggleBus={setShowBus}
+            busAvailable={busAvailable}
             showCameras={showCameras}
             onToggleCameras={setShowCameras}
             camerasAvailable={camerasAvailable}
@@ -836,6 +942,31 @@ export default function App() {
             }}
           />
         )}
+        {panels.bus.open && selectedBus && (
+          <BusDetail
+            chrome={chromeFor("bus")}
+            bus={selectedBus}
+            following={followBusId === selectedBus.id}
+            onToggleFollow={() =>
+              setFollowBusId((f) => (f === selectedBus.id ? null : selectedBus.id))
+            }
+            onZoomTo={() =>
+              mapRef.current?.flyTo({
+                longitude: selectedBus.lon as number,
+                latitude: selectedBus.lat as number,
+                zoom: 15,
+              })
+            }
+            nearby={busNearby}
+            nextId={nextCameraId}
+            onOpenCamera={(c) => selectCamera(c)}
+            onWatchNearby={() => {
+              setWallBusFollow(selectedBus.id);
+              wall.replace(busNearby.map((c) => c.camera.id));
+              wall.setOpen(true);
+            }}
+          />
+        )}
         {panels.camera.open && selectedCamera && (
           <CameraView
             chrome={chromeFor("camera")}
@@ -856,15 +987,30 @@ export default function App() {
           onOpenChange={wall.setOpen}
           cameras={cameras}
           ids={wall.ids}
-          onToggle={wall.toggle}
-          onRemove={wall.remove}
-          onClear={wall.clear}
-          onAddInView={addCamerasInView}
+          onToggle={(id) => {
+            setWallBusFollow(null); // manual edit exits bus-follow
+            wall.toggle(id);
+          }}
+          onRemove={(id) => {
+            setWallBusFollow(null);
+            wall.remove(id);
+          }}
+          onClear={() => {
+            setWallBusFollow(null);
+            wall.clear();
+          }}
+          onAddInView={() => {
+            setWallBusFollow(null);
+            addCamerasInView();
+          }}
           onFocus={(c) => {
             wall.setOpen(false);
             selectCamera(c);
           }}
           max={wall.max}
+          followLabel={followedBus ? `Route ${followedBus.route ?? "?"}` : null}
+          onUnfollow={() => setWallBusFollow(null)}
+          nextId={wallNextId}
         />
         {panels.zones.open && (
           <ZonesPanel

@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   Aircraft,
+  Bus,
   ConnectionStatus,
   GeofenceEvent,
   RiskEvent,
   ServerFrame,
   TrackedAircraft,
+  TrackedBus,
   TrackedVessel,
   Vessel,
 } from "@/types";
@@ -39,6 +41,8 @@ export function useVesselsSocket() {
   const vesselsRef = useRef<Map<number, TrackedVessel>>(new Map());
   // Live aircraft (ADS-B), same ref-not-state strategy, keyed by hex.
   const aircraftRef = useRef<Map<string, TrackedAircraft>>(new Map());
+  // Live London buses (BODS), keyed by vehicle id.
+  const busesRef = useRef<Map<string, TrackedBus>>(new Map());
   const [version, setVersion] = useState(0);
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
   const [events, setEvents] = useState<GeofenceEvent[]>([]);
@@ -50,6 +54,14 @@ export function useVesselsSocket() {
   const dirtyRef = useRef(false);
   const rafRef = useRef<number | null>(null);
 
+  // Aircraft/bus trails are only worth storing while their layer is visible —
+  // otherwise thousands of hidden entities each hold a 60-point trail (~50MB
+  // for the London bus fleet alone). App keeps this in sync with the toggles.
+  const trailGate = useRef({ air: true, bus: true });
+  const setTrailGate = useCallback((g: { air: boolean; bus: boolean }) => {
+    trailGate.current = g;
+  }, []);
+
   const scheduleRender = useCallback(() => {
     if (dirtyRef.current) return;
     dirtyRef.current = true;
@@ -59,36 +71,88 @@ export function useVesselsSocket() {
     });
   }, []);
 
+  // The apply* functions mutate records in place rather than spread-copying:
+  // the backend sends the full merged record each time, and all rendering is
+  // driven by the `version` counter (no component or memo relies on entity
+  // object identity) — so re-allocating thousands of objects per second bought
+  // nothing but GC pressure. Incoming frames are fresh JSON objects, so on
+  // first sight the frame object itself becomes the stored record.
+
   const applyVessel = useCallback((v: Vessel) => {
     const map = vesselsRef.current;
     const prev = map.get(v.mmsi);
-    const trail = prev?.trail ?? [];
-    // Append to the trail only on a genuinely new position fix.
-    if (
-      v.lat != null &&
-      v.lon != null &&
-      (prev?.lat !== v.lat || prev?.lon !== v.lon)
-    ) {
-      trail.push([v.lon, v.lat, v.ts]);
-      if (trail.length > TRAIL_MAX) trail.shift();
+    if (!prev) {
+      const rec = v as TrackedVessel;
+      rec.trail = v.lat != null && v.lon != null ? [[v.lon, v.lat, v.ts]] : [];
+      map.set(v.mmsi, rec);
+      return;
     }
-    map.set(v.mmsi, { ...prev, ...v, trail });
+    // Append to the trail only on a genuinely new position fix.
+    if (v.lat != null && v.lon != null && (prev.lat !== v.lat || prev.lon !== v.lon)) {
+      prev.trail.push([v.lon, v.lat, v.ts]);
+      if (prev.trail.length > TRAIL_MAX) prev.trail.shift();
+    }
+    Object.assign(prev, v); // `v` carries no `trail` key, so the trail survives
   }, []);
 
   const applyAircraft = useCallback((a: Aircraft) => {
     const map = aircraftRef.current;
     const prev = map.get(a.hex);
-    const trail = prev?.trail ?? [];
-    if (
-      a.lat != null &&
-      a.lon != null &&
-      (prev?.lat !== a.lat || prev?.lon !== a.lon)
-    ) {
-      trail.push([a.lon, a.lat, a.ts]);
-      if (trail.length > TRAIL_MAX) trail.shift();
+    const gated = trailGate.current.air;
+    if (!prev) {
+      const rec = a as TrackedAircraft;
+      rec.trail = gated && a.lat != null && a.lon != null ? [[a.lon, a.lat, a.ts]] : [];
+      map.set(a.hex, rec);
+      return;
     }
-    map.set(a.hex, { ...prev, ...a, trail });
+    if (!gated) {
+      if (prev.trail.length) prev.trail.length = 0; // reclaim when layer is off
+    } else if (a.lat != null && a.lon != null && (prev.lat !== a.lat || prev.lon !== a.lon)) {
+      prev.trail.push([a.lon, a.lat, a.ts]);
+      if (prev.trail.length > TRAIL_MAX) prev.trail.shift();
+    }
+    Object.assign(prev, a);
   }, []);
+
+  const applyBus = useCallback((b: Bus) => {
+    const map = busesRef.current;
+    const prev = map.get(b.id);
+    const gated = trailGate.current.bus;
+    if (!prev) {
+      const rec = b as TrackedBus;
+      rec.trail = gated && b.lat != null && b.lon != null ? [[b.lon, b.lat, b.ts]] : [];
+      map.set(b.id, rec);
+      return;
+    }
+    if (!gated) {
+      if (prev.trail.length) prev.trail.length = 0;
+    } else if (b.lat != null && b.lon != null && (prev.lat !== b.lat || prev.lon !== b.lon)) {
+      prev.trail.push([b.lon, b.lat, b.ts]);
+      if (prev.trail.length > TRAIL_MAX) prev.trail.shift();
+    }
+    Object.assign(prev, b);
+  }, []);
+
+  // Client-side backstop eviction. Entities normally leave via the backend's
+  // `removed` lists; if one is ever missed it would otherwise live (trail and
+  // all) for the whole session. TTLs sit well above the backend's own.
+  useEffect(() => {
+    const id = setInterval(() => {
+      const now = Date.now() / 1000;
+      let dropped = 0;
+      for (const [k, v] of vesselsRef.current) {
+        if (now - v.ts > 900) { vesselsRef.current.delete(k); dropped++; }
+      }
+      for (const [k, a] of aircraftRef.current) {
+        if (now - a.ts > 300) { aircraftRef.current.delete(k); dropped++; }
+      }
+      for (const [k, b] of busesRef.current) {
+        if (now - b.ts > 300) { busesRef.current.delete(k); dropped++; }
+      }
+      if (dropped) scheduleRender();
+    }, 60_000);
+    return () => clearInterval(id);
+  }, [scheduleRender]);
 
   useEffect(() => {
     let ws: WebSocket | null = null;
@@ -127,6 +191,12 @@ export function useVesselsSocket() {
         } else if (frame.type === "air_update") {
           for (const a of frame.aircraft) applyAircraft(a);
           for (const hex of frame.removed) aircraftRef.current.delete(hex);
+        } else if (frame.type === "bus_snapshot") {
+          busesRef.current.clear();
+          for (const b of frame.buses) applyBus(b);
+        } else if (frame.type === "bus_update") {
+          for (const b of frame.buses) applyBus(b);
+          for (const id of frame.removed) busesRef.current.delete(id);
         } else if (frame.type === "geofence_event") {
           setEvents((prev) => [frame, ...prev].slice(0, MAX_EVENTS));
           return; // not a vessel update — no render bump needed
@@ -173,16 +243,18 @@ export function useVesselsSocket() {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       ws?.close();
     };
-  }, [applyVessel, applyAircraft, scheduleRender]);
+  }, [applyVessel, applyAircraft, applyBus, scheduleRender]);
 
   return {
     vesselsRef,
     aircraftRef,
+    busesRef,
     version,
     status,
     events,
     riskEvents,
     flagged,
     geofenceSync,
+    setTrailGate,
   };
 }

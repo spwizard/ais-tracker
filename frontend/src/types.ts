@@ -286,6 +286,22 @@ export interface TrackedAircraft extends Aircraft {
   trail: [number, number, number][]; // [lon, lat, ts]
 }
 
+/** A live London bus (BODS SIRI-VM) — a moving land vehicle. Keyed by `id`. */
+export interface Bus {
+  id: string;
+  route: string | null; // published line name, e.g. "24"
+  destination: string | null;
+  operator: string | null; // e.g. "TFLO" for TfL
+  lat: number | null;
+  lon: number | null;
+  bearing: number | null; // degrees clockwise from north
+  ts: number;
+}
+
+export interface TrackedBus extends Bus {
+  trail: [number, number, number][]; // [lon, lat, ts]
+}
+
 /** An airport in a flight route (from GET /api/aircraft/{hex}). */
 export interface Airport {
   name: string | null;
@@ -355,6 +371,8 @@ export type ServerFrame =
   | { type: "update"; vessels: Vessel[]; removed: number[] }
   | { type: "air_snapshot"; aircraft: Aircraft[] }
   | { type: "air_update"; aircraft: Aircraft[]; removed: string[] }
+  | { type: "bus_snapshot"; buses: Bus[] }
+  | { type: "bus_update"; buses: Bus[]; removed: string[] }
   | GeofenceEvent
   | RiskEvent
   | { type: "flagged"; mmsis: number[] }

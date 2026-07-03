@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Cctv, Plus, Trash2, MapPin, Check, X } from "lucide-react";
+import { Cctv, Plus, Trash2, MapPin, Check, X, LocateFixed } from "lucide-react";
 import {
   Command,
   CommandInput,
@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
+import { compassOrder } from "@/lib/compass";
 import { CameraTile } from "./CameraTile";
 import type { Camera } from "@/types";
 
@@ -35,6 +36,9 @@ interface CameraWallProps {
   onAddInView: () => void;
   onFocus: (c: Camera) => void;
   max: number;
+  followLabel: string | null; // e.g. "Route 24" when tracking a bus's nearby cams
+  onUnfollow: () => void;
+  nextId: string | null; // camera the followed bus is heading toward next
 }
 
 export function CameraWall({
@@ -48,14 +52,22 @@ export function CameraWall({
   onAddInView,
   onFocus,
   max,
+  followLabel,
+  onUnfollow,
+  nextId,
 }: CameraWallProps) {
   const [mode, setMode] = useState<"live" | "stills">("live");
   const [picking, setPicking] = useState(false);
   const [query, setQuery] = useState("");
 
   const byId = useMemo(() => new Map(cameras.map((c) => [c.id, c])), [cameras]);
+  // Grouped by which way each camera faces, so same-direction feeds sit together.
   const selected = useMemo(
-    () => ids.map((id) => byId.get(id)).filter((c): c is Camera => !!c),
+    () =>
+      ids
+        .map((id) => byId.get(id))
+        .filter((c): c is Camera => !!c)
+        .sort((a, b) => compassOrder(a.view) - compassOrder(b.view)),
     [ids, byId],
   );
   const full = ids.length >= max;
@@ -147,6 +159,23 @@ export function CameraWall({
         </div>
       </div>
 
+      {/* Bus-follow banner */}
+      {followLabel && (
+        <div className="flex items-center gap-2 border-b border-primary/20 bg-primary/10 px-4 py-1.5 text-xs text-primary">
+          <LocateFixed className="h-3.5 w-3.5 shrink-0" />
+          <span className="truncate">
+            Following <strong className="font-semibold">{followLabel}</strong> — showing the
+            nearest cameras as it moves
+          </span>
+          <button
+            onClick={onUnfollow}
+            className="ml-auto shrink-0 rounded-md px-2 py-0.5 text-[11px] font-medium text-primary/80 transition-colors hover:bg-primary/15"
+          >
+            Stop following
+          </button>
+        </div>
+      )}
+
       {/* Content */}
       <div className="relative min-h-0 flex-1 p-3">
         {selected.length === 0 ? (
@@ -174,6 +203,7 @@ export function CameraWall({
                 camera={c}
                 mode={mode}
                 index={i}
+                isNext={c.id === nextId}
                 onRemove={() => onRemove(c.id)}
                 onFocus={() => onFocus(c)}
               />

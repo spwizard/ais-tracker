@@ -43,6 +43,8 @@ export function useCameraWall() {
     [],
   );
   const clear = useCallback(() => setIds([]), []);
+  // Replace the whole set (used by bus-follow to auto-populate nearest cameras).
+  const replace = useCallback((next: string[]) => setIds(next.slice(0, MAX)), []);
 
-  return { open, setOpen, ids, add, addMany, remove, toggle, clear, max: MAX };
+  return { open, setOpen, ids, add, addMany, remove, toggle, clear, replace, max: MAX };
 }

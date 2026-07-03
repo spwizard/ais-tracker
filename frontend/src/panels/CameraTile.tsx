@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
+import { compassLabel } from "@/lib/compass";
+import { cn } from "@/lib/utils";
 import type { Camera } from "@/types";
 
 const STAGGER_MS = 150; // offset each tile's first load so decoders don't spike
@@ -20,12 +22,14 @@ export function CameraTile({
   camera,
   mode,
   index,
+  isNext = false,
   onRemove,
   onFocus,
 }: {
   camera: Camera;
   mode: "live" | "stills";
   index: number;
+  isNext?: boolean;
   onRemove: () => void;
   onFocus: () => void;
 }) {
@@ -66,7 +70,10 @@ export function CameraTile({
       v.removeAttribute("src");
       v.load();
     };
-  }, [mode, camera.id, camera.video, camera.available, index]);
+    // `index` is only for stagger timing (captured on mount) — it must NOT be a
+    // dependency, or reordering the wall (e.g. bus-follow) reloads the video.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, camera.id, camera.video, camera.available]);
 
   useEffect(() => {
     if (mode !== "stills") return;
@@ -75,12 +82,16 @@ export function CameraTile({
       STILL_REFRESH_MS + index * 1500,
     );
     return () => clearInterval(id);
-  }, [mode, index]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
 
   return (
     <div
       ref={wrapRef}
-      className="group relative h-full w-full overflow-hidden rounded-lg border border-foreground/10 bg-black"
+      className={cn(
+        "group relative h-full w-full overflow-hidden rounded-lg border bg-black",
+        isNext ? "border-cyan-400 ring-2 ring-cyan-400/60" : "border-foreground/10",
+      )}
     >
       {!camera.available ? (
         <div className="grid h-full place-items-center text-[10px] text-muted-foreground">
@@ -106,8 +117,13 @@ export function CameraTile({
         />
       )}
 
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/75 to-transparent px-2 pb-1 pt-4 text-[10px] font-medium text-white">
-        {camera.name ?? "Camera"}
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end gap-1.5 bg-gradient-to-t from-black/75 to-transparent px-2 pb-1 pt-4 text-[10px] font-medium text-white">
+        <span className="min-w-0 flex-1 truncate">{camera.name ?? "Camera"}</span>
+        {compassLabel(camera.view) && (
+          <span className="shrink-0 rounded bg-white/20 px-1 text-[9px] font-semibold">
+            {compassLabel(camera.view)}
+          </span>
+        )}
       </div>
 
       {camera.available && mode === "live" && (
@@ -117,6 +133,12 @@ export function CameraTile({
             <span className="relative inline-flex h-1 w-1 rounded-full bg-red-500" />
           </span>
           Live
+        </div>
+      )}
+
+      {isNext && (
+        <div className="pointer-events-none absolute left-1/2 top-1.5 -translate-x-1/2 animate-pulse rounded-full bg-cyan-400 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-black shadow">
+          Next
         </div>
       )}
 

@@ -1,8 +1,26 @@
-import { Layers, Route, Navigation, Flame, Wind, Waves, History, Loader2, Mountain, Plane, Cctv, LayoutGrid } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import {
+  Layers,
+  Route,
+  Navigation,
+  Flame,
+  Wind,
+  Waves,
+  History,
+  Loader2,
+  Mountain,
+  Plane,
+  Cctv,
+  LayoutGrid,
+  Bus,
+  ChevronDown,
+  type LucideIcon,
+} from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
+import { Hint } from "@/components/ui/tooltip";
 import { FloatingPanel, type PanelChrome } from "@/components/FloatingPanel";
+import { cn } from "@/lib/utils";
 import type { ViewTarget } from "@/map/MapView";
 
 interface LayerControlsProps {
@@ -20,6 +38,9 @@ interface LayerControlsProps {
   showAir: boolean;
   onToggleAir: (v: boolean) => void;
   airAvailable: boolean;
+  showBus: boolean;
+  onToggleBus: (v: boolean) => void;
+  busAvailable: boolean;
   showCameras: boolean;
   onToggleCameras: (v: boolean) => void;
   camerasAvailable: boolean;
@@ -46,6 +67,65 @@ const REGIONS: { label: string; target: ViewTarget }[] = [
   { label: "Norway (Skagerrak)", target: { longitude: 10.5, latitude: 59.2, zoom: 7 } },
 ];
 
+/** A collapsible domain group (Sea / Air / Land / View / Regions). */
+function Section({
+  title,
+  children,
+  defaultOpen = true,
+}: {
+  title: string;
+  children: ReactNode;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center gap-1 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 transition-colors hover:text-muted-foreground"
+      >
+        <ChevronDown className={cn("h-3 w-3 transition-transform", !open && "-rotate-90")} />
+        {title}
+      </button>
+      {open && <div className="mt-0.5 space-y-0.5">{children}</div>}
+    </div>
+  );
+}
+
+/** A compact toggle row; its description (if any) shows on hover. */
+function Row({
+  icon: Icon,
+  label,
+  hint,
+  checked,
+  onChange,
+}: {
+  icon: LucideIcon;
+  label: string;
+  hint?: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  const content = (
+    <span className="flex items-center gap-2 text-sm">
+      <Icon className="h-4 w-4 text-muted-foreground" />
+      {label}
+    </span>
+  );
+  return (
+    <label className="flex cursor-pointer items-center justify-between rounded-md px-1 py-1 transition-colors hover:bg-foreground/5">
+      {hint ? (
+        <Hint label={hint} side="right">
+          {content}
+        </Hint>
+      ) : (
+        content
+      )}
+      <Switch checked={checked} onCheckedChange={onChange} />
+    </label>
+  );
+}
+
 export function LayerControls({
   chrome,
   showTrails,
@@ -61,6 +141,9 @@ export function LayerControls({
   showAir,
   onToggleAir,
   airAvailable,
+  showBus,
+  onToggleBus,
+  busAvailable,
   showCameras,
   onToggleCameras,
   camerasAvailable,
@@ -76,123 +159,104 @@ export function LayerControls({
 }: LayerControlsProps) {
   return (
     <FloatingPanel title="Layers & regions" icon={Layers} width={240} {...chrome}>
-      <div className="space-y-3 p-3">
-        <label className="flex cursor-pointer items-center justify-between rounded-md px-1 py-1">
-          <span className="flex items-center gap-2 text-sm">
-            <Route className="h-4 w-4 text-muted-foreground" />
-            Vessel trails
-          </span>
-          <Switch checked={showTrails} onCheckedChange={onToggleTrails} />
-        </label>
-
-        <label className="flex cursor-pointer items-center justify-between rounded-md px-1 py-1">
-          <span className="flex items-center gap-2 text-sm">
-            <Flame className="h-4 w-4 text-muted-foreground" />
-            Density heatmap
-          </span>
-          <Switch checked={densityMode} onCheckedChange={onToggleDensity} />
-        </label>
-        <p className="px-1 text-[10px] leading-snug text-muted-foreground/60">
-          Shows shipping-lane density. Also appears automatically when you zoom out.
-        </p>
-
-        {windAvailable && (
-          <label className="flex cursor-pointer items-center justify-between rounded-md px-1 py-1">
-            <span className="flex items-center gap-2 text-sm">
-              <Wind className="h-4 w-4 text-muted-foreground" />
-              Wind (GFS)
-            </span>
-            <Switch checked={showWind} onCheckedChange={onToggleWind} />
-          </label>
-        )}
-
-        {wavesAvailable && (
-          <label className="flex cursor-pointer items-center justify-between rounded-md px-1 py-1">
-            <span className="flex items-center gap-2 text-sm">
-              <Waves className="h-4 w-4 text-muted-foreground" />
-              Sea state (GFS-Wave)
-            </span>
-            <Switch checked={showWaves} onCheckedChange={onToggleWaves} />
-          </label>
-        )}
+      <div className="space-y-2 p-3">
+        <Section title="Sea">
+          <Row icon={Route} label="Vessel trails" checked={showTrails} onChange={onToggleTrails} />
+          <Row
+            icon={Flame}
+            label="Density heatmap"
+            hint="Shipping-lane density. Also appears automatically when you zoom out."
+            checked={densityMode}
+            onChange={onToggleDensity}
+          />
+          {windAvailable && (
+            <Row icon={Wind} label="Wind (GFS)" checked={showWind} onChange={onToggleWind} />
+          )}
+          {wavesAvailable && (
+            <Row
+              icon={Waves}
+              label="Sea state (GFS-Wave)"
+              checked={showWaves}
+              onChange={onToggleWaves}
+            />
+          )}
+        </Section>
 
         {airAvailable && (
-          <>
-            <label className="flex cursor-pointer items-center justify-between rounded-md px-1 py-1">
-              <span className="flex items-center gap-2 text-sm">
-                <Plane className="h-4 w-4 text-muted-foreground" />
-                Air traffic (ADS-B)
-              </span>
-              <Switch checked={showAir} onCheckedChange={onToggleAir} />
-            </label>
-            <p className="px-1 text-[10px] leading-snug text-muted-foreground/60">
-              Live aircraft over the region, coloured by altitude.
-            </p>
-          </>
+          <Section title="Air">
+            <Row
+              icon={Plane}
+              label="Air traffic (ADS-B)"
+              hint="Live aircraft over the region, coloured by altitude."
+              checked={showAir}
+              onChange={onToggleAir}
+            />
+          </Section>
         )}
 
-        {camerasAvailable && (
-          <>
-            <label className="flex cursor-pointer items-center justify-between rounded-md px-1 py-1">
-              <span className="flex items-center gap-2 text-sm">
-                <Cctv className="h-4 w-4 text-muted-foreground" />
-                Traffic cameras (London)
-              </span>
-              <Switch checked={showCameras} onCheckedChange={onToggleCameras} />
-            </label>
-            <p className="px-1 text-[10px] leading-snug text-muted-foreground/60">
-              Live TfL junction cameras — zoom into London, then click one.
-            </p>
-            <button
-              onClick={onOpenWall}
-              className="flex w-full items-center justify-center gap-1.5 rounded-md border border-foreground/10 bg-foreground/5 px-2 py-1.5 text-xs font-medium text-foreground/80 transition-colors hover:bg-foreground/10 hover:text-foreground"
-            >
-              <LayoutGrid className="h-3.5 w-3.5" />
-              Camera wall{wallCount > 0 ? ` (${wallCount})` : ""}
-            </button>
-          </>
-        )}
-
-        <Separator />
-        <label className="flex cursor-pointer items-center justify-between rounded-md px-1 py-1">
-          <span className="flex items-center gap-2 text-sm">
-            <Mountain className="h-4 w-4 text-muted-foreground" />
-            Cinematic coast (3D)
-          </span>
-          <Switch checked={cinematic} onCheckedChange={onToggleCinematic} />
-        </label>
-        <p className="px-1 text-[10px] leading-snug text-muted-foreground/60">
-          Photoreal 3D terrain + buildings, tilted to the horizon.
-        </p>
-
-        {replayAvailable && (
-          <>
-            <Separator />
-            <label className="flex cursor-pointer items-center justify-between rounded-md px-1 py-1">
-              <span className="flex items-center gap-2 text-sm">
-                <History className="h-4 w-4 text-muted-foreground" />
-                Movement replay
-              </span>
-              <Switch checked={replayMode} onCheckedChange={onToggleReplay} />
-            </label>
-            <p className="px-1 text-[10px] leading-snug text-muted-foreground/60">
-              Scrub recent vessel tracks in view through time. Pauses the live feed.
-            </p>
-            {replayMode && replayLoading && (
-              <div className="flex items-center gap-2 px-1 text-[11px] text-primary">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                Loading tracks…
-              </div>
+        {(busAvailable || camerasAvailable) && (
+          <Section title="Land">
+            {busAvailable && (
+              <Row
+                icon={Bus}
+                label="Buses (London)"
+                hint="Live TfL buses — zoom into London, then click one to follow it."
+                checked={showBus}
+                onChange={onToggleBus}
+              />
             )}
-          </>
+            {camerasAvailable && (
+              <>
+                <Row
+                  icon={Cctv}
+                  label="Traffic cameras"
+                  hint="Live TfL junction cameras — zoom into London, then click one."
+                  checked={showCameras}
+                  onChange={onToggleCameras}
+                />
+                <button
+                  onClick={onOpenWall}
+                  className="!mt-2 flex w-full items-center justify-center gap-1.5 rounded-md border border-foreground/10 bg-foreground/5 px-2 py-1.5 text-xs font-medium text-foreground/80 transition-colors hover:bg-foreground/10 hover:text-foreground"
+                >
+                  <LayoutGrid className="h-3.5 w-3.5" />
+                  Camera wall{wallCount > 0 ? ` (${wallCount})` : ""}
+                </button>
+              </>
+            )}
+          </Section>
         )}
 
-        <Separator />
+        <Section title="View">
+          <Row
+            icon={Mountain}
+            label="Cinematic coast (3D)"
+            hint="Photoreal 3D terrain + buildings, tilted to the horizon."
+            checked={cinematic}
+            onChange={onToggleCinematic}
+          />
+          {replayAvailable && (
+            <>
+              <Row
+                icon={History}
+                label="Movement replay"
+                hint="Scrub recent vessel tracks in view through time. Pauses the live feed."
+                checked={replayMode}
+                onChange={onToggleReplay}
+              />
+              {replayMode && replayLoading && (
+                <div className="flex items-center gap-2 px-1 text-[11px] text-primary">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Loading tracks…
+                </div>
+              )}
+            </>
+          )}
+        </Section>
 
-        <div>
-          <div className="mb-1.5 flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-muted-foreground">
+        <Section title="Jump to region" defaultOpen={false}>
+          <div className="mb-1 flex items-center gap-1.5 px-1 text-[10px] text-muted-foreground/50">
             <Navigation className="h-3 w-3" />
-            Jump to region
+            Fly the map to a coverage area
           </div>
           <div className="grid grid-cols-2 gap-1.5">
             {REGIONS.map((r) => (
@@ -207,7 +271,7 @@ export function LayerControls({
               </Button>
             ))}
           </div>
-        </div>
+        </Section>
       </div>
     </FloatingPanel>
   );

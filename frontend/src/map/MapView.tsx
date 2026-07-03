@@ -18,6 +18,7 @@ import { Map } from "react-map-gl/maplibre";
 import type {
   TrackedVessel,
   TrackedAircraft,
+  TrackedBus,
   Camera,
   DensityPoint,
   WeatherMeta,
@@ -28,6 +29,8 @@ import { NAV_STATUS, colorHexFor } from "@/lib/shipTypes";
 import { buildLayers } from "./layers";
 import { buildAircraftLayers, buildRouteLayers, type AirRoute } from "./aircraftLayers";
 import { buildCameraLayers } from "./cameraLayers";
+import { buildBusLayers } from "./busLayers";
+import { ScatterplotLayer, TextLayer } from "@deck.gl/layers";
 import { buildReplayLayers, type TrailMode, type ColorMode } from "./replayLayers";
 import { advanceClock } from "./replayMath";
 import { buildFenceLayers, buildDraftLayers } from "./geofenceLayers";
@@ -53,6 +56,8 @@ export interface ViewTarget {
 
 export interface MapHandle {
   flyTo: (target: ViewTarget) => void;
+  /** Gently recenter on a point without changing zoom (for follow-mode). */
+  panTo: (longitude: number, latitude: number) => void;
   zoomBy: (delta: number) => void;
   resetNorth: () => void;
   fit: () => void;
@@ -128,6 +133,13 @@ interface MapViewProps {
   showCameras: boolean;
   onSelectCamera: (c: Camera | null) => void;
   selectedCameraId: string | null;
+  // London buses (land, moving) layer.
+  buses: TrackedBus[];
+  showBus: boolean;
+  onSelectBus: (b: TrackedBus | null) => void;
+  selectedBusId: string | null;
+  // The camera the selected bus is heading toward next — pulse a ring on it.
+  nextCameraPos: [number, number] | null;
 }
 
 const INITIAL_VIEW = {
@@ -194,6 +206,11 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
     showCameras,
     onSelectCamera,
     selectedCameraId,
+    buses,
+    showBus,
+    onSelectBus,
+    selectedBusId,
+    nextCameraPos,
   } = props;
 
   const drawing = drawMode != null;
@@ -218,12 +235,20 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
     setCurrentTime(t);
   }, []);
 
-  // Live clock — wall-clock, paused while replaying.
+  // Live clock — wall-clock, paused while replaying. Throttled to ~10Hz: each
+  // tick re-renders the whole layer stack and re-runs the dead-reckoning
+  // accessors over every vessel, so 60fps here meant ~1M allocations/sec for
+  // motion that is sub-pixel per frame at map zooms. 10Hz is visually identical
+  // and cuts that churn 6×.
   useEffect(() => {
     if (replayMode) return;
     let raf = 0;
-    const tick = () => {
-      if (!document.hidden) setTime(Date.now() / 1000);
+    let last = 0;
+    const tick = (now: number) => {
+      if (!document.hidden && now - last >= 100) {
+        last = now;
+        setTime(Date.now() / 1000);
+      }
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
@@ -284,6 +309,14 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
         ...t,
         transitionDuration: 1400,
         transitionInterpolator: new FlyToInterpolator({ speed: 1.6 }),
+      })),
+    panTo: (longitude, latitude) =>
+      setViewState((prev) => ({
+        ...prev,
+        longitude,
+        latitude,
+        transitionDuration: 600,
+        transitionInterpolator: new LinearInterpolator(["longitude", "latitude"]),
       })),
     zoomBy: (delta) =>
       setViewState((prev) => ({
@@ -460,6 +493,17 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
             onClick: onSelectCamera,
           })
         : []),
+      // London buses (land, moving) — shown when zoomed into London.
+      ...(showBus
+        ? buildBusLayers({
+            buses,
+            zoom,
+            selectedId: selectedBusId,
+            onClick: onSelectBus,
+          })
+        : []),
+      // Pulsing ring on the camera the selected bus is heading toward next.
+      ...(nextCameraPos ? buildNextCameraRing(nextCameraPos, currentTime) : []),
     ],
     // currentTime drives trail animation + motion; version drives data refresh.
     [
@@ -486,6 +530,11 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
       showCameras,
       selectedCameraId,
       onSelectCamera,
+      buses,
+      showBus,
+      selectedBusId,
+      onSelectBus,
+      nextCameraPos,
       densityMode,
       drawing,
       showTrails,
@@ -570,9 +619,12 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
             ? buildAircraftTooltip(object as TrackedAircraft)
             : object && (object as Camera).image
               ? buildCameraTooltip(object as Camera)
-              : object && (object as Alert).category
-                ? buildAlertTooltip(object as Alert)
-                : buildTooltip(object as TrackedVessel | null)
+              : object && (object as TrackedBus).route !== undefined &&
+                  (object as TrackedBus).operator !== undefined
+                ? buildBusTooltip(object as TrackedBus)
+                : object && (object as Alert).category
+                  ? buildAlertTooltip(object as Alert)
+                  : buildTooltip(object as TrackedVessel | null)
       }
       onClick={(info) => {
         if (drawing) {
@@ -585,6 +637,7 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
           onSelect(null);
           onSelectAircraft(null);
           onSelectCamera(null);
+          onSelectBus(null);
         }
       }}
       // Attach drag/hover handlers ONLY while drawing a geofence. When they're
@@ -741,6 +794,58 @@ function buildAircraftTooltip(a: TrackedAircraft) {
         <div style="opacity:.7;font-size:11px;line-height:1.5">
           Alt ${alt}${climb}<br/>
           Speed ${speed} · Track ${a.track != null ? Math.round(a.track) + "°" : "—"}
+        </div>
+      </div>`,
+    style: tooltipStyle(),
+  };
+}
+
+/** A pulsing cyan ring + "NEXT" label on the camera a followed bus is heading to. */
+function buildNextCameraRing(pos: [number, number], t: number) {
+  const pulse = 0.5 + 0.5 * Math.sin(t * 3);
+  return [
+    new ScatterplotLayer<{ pos: [number, number] }>({
+      id: "next-camera-ring",
+      data: [{ pos }],
+      getPosition: (d) => d.pos,
+      stroked: true,
+      filled: false,
+      getLineColor: [125, 211, 252, Math.round(140 + pulse * 115)],
+      lineWidthMinPixels: 2.5,
+      getRadius: 26 + pulse * 10,
+      radiusUnits: "pixels",
+      updateTriggers: { getRadius: t, getLineColor: t },
+    }),
+    new TextLayer<{ pos: [number, number] }>({
+      id: "next-camera-label",
+      data: [{ pos }],
+      getPosition: (d) => d.pos,
+      getText: () => "NEXT",
+      getSize: 11,
+      getColor: [125, 211, 252],
+      getPixelOffset: [0, -34],
+      fontFamily: "Inter, system-ui, sans-serif",
+      fontWeight: 700,
+      outlineColor: [10, 16, 26],
+      outlineWidth: 2,
+      fontSettings: { sdf: true },
+      getTextAnchor: "middle",
+      getAlignmentBaseline: "bottom",
+    }),
+  ];
+}
+
+function buildBusTooltip(b: TrackedBus) {
+  const color = b.operator === "TFLO" ? "#e22d26" : "#f59e0b";
+  return {
+    html: `
+      <div style="font-family:Inter,system-ui,sans-serif;min-width:150px">
+        <div style="display:flex;align-items:center;gap:6px;font-weight:600;margin-bottom:2px">
+          <span style="min-width:18px;height:16px;padding:0 3px;border-radius:4px;background:${color};color:#fff;font-size:11px;font-weight:700;display:inline-flex;align-items:center;justify-content:center">${escapeHtml(b.route ?? "?")}</span>
+          ${escapeHtml(b.destination ?? "")}
+        </div>
+        <div style="opacity:.7;font-size:11px">
+          ${b.operator === "TFLO" ? "Transport for London" : escapeHtml(b.operator ?? "")} · click to follow
         </div>
       </div>`,
     style: tooltipStyle(),
