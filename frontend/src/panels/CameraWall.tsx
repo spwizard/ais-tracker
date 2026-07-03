@@ -38,6 +38,8 @@ interface CameraWallProps {
   max: number;
   followLabel: string | null; // e.g. "Route 24" when tracking a bus's nearby cams
   onUnfollow: () => void;
+  contextLabel: string | null; // e.g. an alert title, for a static eyes-on-scene wall
+  onClearContext: () => void;
   nextId: string | null; // camera the followed bus is heading toward next
 }
 
@@ -54,6 +56,8 @@ export function CameraWall({
   max,
   followLabel,
   onUnfollow,
+  contextLabel,
+  onClearContext,
   nextId,
 }: CameraWallProps) {
   const [mode, setMode] = useState<"live" | "stills">("live");
@@ -172,6 +176,23 @@ export function CameraWall({
             className="ml-auto shrink-0 rounded-md px-2 py-0.5 text-[11px] font-medium text-primary/80 transition-colors hover:bg-primary/15"
           >
             Stop following
+          </button>
+        </div>
+      )}
+
+      {/* Eyes-on-alert banner (static scene, no re-targeting) */}
+      {!followLabel && contextLabel && (
+        <div className="flex items-center gap-2 border-b border-amber-500/20 bg-amber-500/10 px-4 py-1.5 text-xs text-amber-500">
+          <Cctv className="h-3.5 w-3.5 shrink-0" />
+          <span className="truncate">
+            Eyes on: <strong className="font-semibold">{contextLabel}</strong> — nearest
+            cameras to the alert
+          </span>
+          <button
+            onClick={onClearContext}
+            className="ml-auto shrink-0 rounded-md px-2 py-0.5 text-[11px] font-medium text-amber-500/80 transition-colors hover:bg-amber-500/15"
+          >
+            Dismiss
           </button>
         </div>
       )}

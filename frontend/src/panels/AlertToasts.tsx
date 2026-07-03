@@ -8,6 +8,7 @@ import {
   Waypoints,
   Zap,
   X,
+  Cctv,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -55,9 +56,15 @@ interface Toast {
 export function AlertToasts({
   alerts,
   onClick,
+  hasEyes,
+  onEyes,
 }: {
   alerts: ToastAlert[];
   onClick: (a: ToastAlert) => void;
+  /** True when live cameras exist near this alert (shows the eyes button). */
+  hasEyes?: (a: ToastAlert) => boolean;
+  /** Turn the nearby cameras toward the alert (fills the camera wall). */
+  onEyes?: (a: ToastAlert) => void;
 }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const seen = useRef<Set<string>>(new Set());
@@ -117,6 +124,19 @@ export function AlertToasts({
               <div className="truncate font-medium">{alert.title}</div>
               <div className="truncate text-muted-foreground">{alert.subtitle}</div>
             </div>
+            {onEyes && hasEyes?.(alert) && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onEyes(alert);
+                }}
+                title="Watch nearby cameras"
+                aria-label="Watch nearby cameras"
+                className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-primary hover:bg-primary/15"
+              >
+                <Cctv className="h-3.5 w-3.5" />
+              </button>
+            )}
             <button
               onClick={(e) => {
                 e.stopPropagation();

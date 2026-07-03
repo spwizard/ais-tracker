@@ -1,4 +1,4 @@
-import { Activity, ArrowRight } from "lucide-react";
+import { Activity, ArrowRight, Cctv } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ToastAlert } from "@/panels/AlertToasts";
 
@@ -18,10 +18,16 @@ export function AlertsContent({
   alerts,
   onSelect,
   onSeeAll,
+  hasEyes,
+  onEyes,
 }: {
   alerts: ToastAlert[];
   onSelect: (a: { mmsi: number; lat: number; lon: number }) => void;
   onSeeAll: () => void;
+  /** True when live cameras exist near this alert (shows the eyes button). */
+  hasEyes?: (a: ToastAlert) => boolean;
+  /** Turn the nearby cameras toward the alert (fills the camera wall). */
+  onEyes?: (a: ToastAlert) => void;
 }) {
   const recent = alerts.slice(0, 8);
   return (
@@ -39,27 +45,45 @@ export function AlertsContent({
         <div className="px-2 py-6 text-center text-sm text-muted-foreground">No events yet.</div>
       ) : (
         <div className="max-h-[56vh] overflow-y-auto">
-          {recent.map((a) => (
-            <button
-              key={a.key}
-              onClick={() => onSelect({ mmsi: a.mmsi, lat: a.lat, lon: a.lon })}
-              className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-foreground/5"
-            >
-              <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-foreground/5">
-                <Activity
-                  className={cn("h-3.5 w-3.5", RISK_KINDS.has(a.kind) ? "text-rose-400" : "text-sky-400")}
-                />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm leading-tight">{a.title}</span>
-                <span className="block truncate text-[11px] leading-tight text-muted-foreground">
-                  {a.subtitle}
-                </span>
-              </span>
-              <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">{ago(a.ts)}</span>
-              <ArrowRight className="h-3 w-3 shrink-0 text-muted-foreground/30" />
-            </button>
-          ))}
+          {recent.map((a) => {
+            const eyes = !!onEyes && !!hasEyes?.(a);
+            return (
+              <div
+                key={a.key}
+                className="group flex items-center rounded-lg pr-1 transition-colors hover:bg-foreground/5"
+              >
+                <button
+                  onClick={() => onSelect({ mmsi: a.mmsi, lat: a.lat, lon: a.lon })}
+                  className="flex min-w-0 flex-1 items-center gap-2.5 px-2 py-1.5 text-left"
+                >
+                  <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-foreground/5">
+                    <Activity
+                      className={cn("h-3.5 w-3.5", RISK_KINDS.has(a.kind) ? "text-rose-400" : "text-sky-400")}
+                    />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm leading-tight">{a.title}</span>
+                    <span className="block truncate text-[11px] leading-tight text-muted-foreground">
+                      {a.subtitle}
+                    </span>
+                  </span>
+                  <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">{ago(a.ts)}</span>
+                </button>
+                {eyes ? (
+                  <button
+                    onClick={() => onEyes?.(a)}
+                    title="Watch nearby cameras"
+                    aria-label="Watch nearby cameras"
+                    className="ml-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-md text-primary transition-colors hover:bg-primary/15"
+                  >
+                    <Cctv className="h-4 w-4" />
+                  </button>
+                ) : (
+                  <ArrowRight className="mr-1 h-3 w-3 shrink-0 text-muted-foreground/30" />
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

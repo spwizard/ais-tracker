@@ -98,6 +98,7 @@ export default function App() {
   const [selectedBusId, setSelectedBusId] = useState<string | null>(null);
   const [followBusId, setFollowBusId] = useState<string | null>(null);
   const [wallBusFollow, setWallBusFollow] = useState<string | null>(null); // wall tracks this bus
+  const [wallContext, setWallContext] = useState<string | null>(null); // wall shows cams near an alert
 
   // Only store aircraft/bus trails while their layer is on (memory).
   useEffect(
@@ -336,8 +337,9 @@ export default function App() {
     if (b?.lat != null && b?.lon != null) mapRef.current?.panTo(b.lon, b.lat);
   }, [version, followBusId, busesRef]);
 
-  // London traffic cameras — also fetched when a bus is selected (for fusion).
-  const cameras = useCameras(showCameras || wall.open || selectedBusId != null);
+  // London traffic cameras — loaded once whenever the feature exists: the map
+  // layer, the wall, bus fusion AND alert-eyes all draw on the same catalog.
+  const cameras = useCameras(camerasAvailable);
   // Cameras nearest the selected bus, right now (recomputes as it moves).
   const busNearby = useMemo(
     () => (selectedBus ? nearbyCameras(selectedBus, cameras) : []),
@@ -395,6 +397,27 @@ export default function App() {
       .map((c) => c.id);
     wall.addMany(inView);
   }, [cameras, wall]);
+
+  // Eyes-on-alert: turn the nearest cameras toward an alert (one click from the
+  // toast). Wider radius than bus fusion — alerts are sparser than junctions.
+  const ALERT_EYES_RADIUS_M = 1500;
+  const alertHasEyes = useCallback(
+    (a: ToastAlert) =>
+      cameras.length > 0 && nearbyCameras(a, cameras, 1, ALERT_EYES_RADIUS_M).length > 0,
+    [cameras],
+  );
+  const alertEyes = useCallback(
+    (a: ToastAlert) => {
+      const near = nearbyCameras(a, cameras, wall.max, ALERT_EYES_RADIUS_M);
+      if (near.length === 0) return;
+      setWallBusFollow(null);
+      setWallContext(a.title);
+      wall.replace(near.map((c) => c.camera.id));
+      wall.setOpen(true);
+    },
+    [cameras, wall],
+  );
+
   const selectedCamera = useMemo(
     () => (selectedCameraId ? cameras.find((c) => c.id === selectedCameraId) ?? null : null),
     [selectedCameraId, cameras],
@@ -870,6 +893,11 @@ export default function App() {
               openData("alerts");
               setIsland(null);
             }}
+            hasEyes={alertHasEyes}
+            onEyes={(a) => {
+              alertEyes(a);
+              setIsland(null);
+            }}
           />
         </IslandDropdown>
 
@@ -962,6 +990,7 @@ export default function App() {
             onOpenCamera={(c) => selectCamera(c)}
             onWatchNearby={() => {
               setWallBusFollow(selectedBus.id);
+              setWallContext(null);
               wall.replace(busNearby.map((c) => c.camera.id));
               wall.setOpen(true);
             }}
@@ -988,19 +1017,23 @@ export default function App() {
           cameras={cameras}
           ids={wall.ids}
           onToggle={(id) => {
-            setWallBusFollow(null); // manual edit exits bus-follow
+            setWallBusFollow(null); // manual edit exits bus-follow / alert context
+            setWallContext(null);
             wall.toggle(id);
           }}
           onRemove={(id) => {
             setWallBusFollow(null);
+            setWallContext(null);
             wall.remove(id);
           }}
           onClear={() => {
             setWallBusFollow(null);
+            setWallContext(null);
             wall.clear();
           }}
           onAddInView={() => {
             setWallBusFollow(null);
+            setWallContext(null);
             addCamerasInView();
           }}
           onFocus={(c) => {
@@ -1010,6 +1043,8 @@ export default function App() {
           max={wall.max}
           followLabel={followedBus ? `Route ${followedBus.route ?? "?"}` : null}
           onUnfollow={() => setWallBusFollow(null)}
+          contextLabel={wallContext}
+          onClearContext={() => setWallContext(null)}
           nextId={wallNextId}
         />
         {panels.zones.open && (
@@ -1048,6 +1083,10 @@ export default function App() {
             onStop={analyst.stop}
             onClear={analyst.clear}
             onVessel={selectByMmsi}
+            onOpenCamera={(id) => {
+              const c = cameras.find((x) => x.id === id);
+              if (c) selectCamera(c);
+            }}
           />
         )}
 
@@ -1070,7 +1109,12 @@ export default function App() {
           }}
         />
 
-        <AlertToasts alerts={toastAlerts} onClick={onEventClick} />
+        <AlertToasts
+          alerts={toastAlerts}
+          onClick={onEventClick}
+          hasEyes={alertHasEyes}
+          onEyes={alertEyes}
+        />
 
         {densityMode && (
           <DensityTimeline buckets={buckets} onSelect={onTimelineSelect} />
