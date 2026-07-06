@@ -62,7 +62,9 @@ class CameraAnalyst:
         if not self._api_key:
             raise VisionUnavailable("Claude API not configured — set ANTHROPIC_API_KEY")
         if self._client is None:
-            self._client = anthropic.AsyncAnthropic(api_key=self._api_key, max_retries=1)
+            # 529 "overloaded" comes in short bursts; give the SDK's exponential
+            # backoff enough attempts to ride one out instead of failing the scene.
+            self._client = anthropic.AsyncAnthropic(api_key=self._api_key, max_retries=4)
         return self._client
 
     async def close(self) -> None:
