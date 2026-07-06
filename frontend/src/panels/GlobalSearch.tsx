@@ -168,7 +168,13 @@ export function GlobalSearchContent({
               <CommandGroup heading="Intelligence">
                 <SeeMore cat="intelligence" total={counts.intelligence} shown={results.intelligence.length} />
                 {results.intelligence.map((it, i) => (
-                  <IntelRow key={i} it={it} q={query} onSelect={() => act(() => onSelectIntel(it))} />
+                  <IntelRow
+                    key={i}
+                    it={it}
+                    q={query}
+                    live={isLive ? isLive(it.mmsi) : true}
+                    onSelect={() => act(() => onSelectIntel(it))}
+                  />
                 ))}
               </CommandGroup>
             )}
@@ -283,16 +289,34 @@ function EventRow({
   );
 }
 
-function IntelRow({ it, q, onSelect }: { it: SearchIntel; q: string; onSelect: () => void }) {
+function IntelRow({
+  it,
+  q,
+  live,
+  onSelect,
+}: {
+  it: SearchIntel;
+  q: string;
+  live: boolean;
+  onSelect: () => void;
+}) {
   return (
     <CommandItem value={`i-${it.kind}-${it.mmsi ?? it.title}`} onSelect={onSelect}>
       <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-foreground/5">
         <ShieldAlert className="h-3.5 w-3.5 text-amber-400" />
       </span>
-      <span className="min-w-0 truncate">
+      <span className="min-w-0 flex-1 truncate">
         <span className="font-medium"><Highlight text={it.title ?? "—"} q={q} /></span>
         <span className="text-muted-foreground"> · {it.subtitle}</span>
       </span>
+      {!live && (
+        <span
+          className="ml-auto shrink-0 rounded border border-foreground/15 px-1 py-px text-[9px] font-medium uppercase tracking-wide text-muted-foreground"
+          title="Intelligence holding — this vessel is not currently transmitting in coverage, so there is nothing to show on the map"
+        >
+          not live
+        </span>
+      )}
     </CommandItem>
   );
 }
