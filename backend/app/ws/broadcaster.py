@@ -28,10 +28,15 @@ _ALERT_FRAMES = ("geofence_event", "risk_event")
 
 
 class Broadcaster:
-    def __init__(self, store, hz: float, air_store=None, bus_store=None) -> None:
+    def __init__(
+        self, store, hz: float, air_store=None, bus_store=None, train_store=None,
+        tube_store=None,
+    ) -> None:
         self._store = store
         self._air_store = air_store  # optional AircraftStore (ADS-B domain)
         self._bus_store = bus_store  # optional BusStore (land domain)
+        self._train_store = train_store  # optional TrainStore (rail domain)
+        self._tube_store = tube_store  # optional TubeStore (London Underground)
         self._interval = 1.0 / max(hz, 0.1)
         self._clients: set[WebSocket] = set()
         self._task: asyncio.Task | None = None
@@ -40,6 +45,8 @@ class Broadcaster:
         self._last_sent: dict[int, float] = {}  # mmsi -> ts last broadcast
         self._last_sent_air: dict[str, float] = {}  # hex -> ts last broadcast
         self._last_sent_bus: dict[str, float] = {}  # bus id -> ts last broadcast
+        self._last_sent_train: dict[str, float] = {}  # train id -> ts last broadcast
+        self._last_sent_tube: dict[str, float] = {}  # tube train id -> ts last broadcast
         # Optional sink that persists alert frames (set by the app).
         self.alert_sink: Callable[[dict], None] | None = None
 
@@ -76,6 +83,16 @@ class Broadcaster:
             await ws.send_json(
                 {"type": "bus_snapshot", "buses": [b.model_dump() for b in buses]}
             )
+        if self._train_store is not None:
+            trains = await self._train_store.snapshot()
+            await ws.send_json(
+                {"type": "train_snapshot", "trains": [t.model_dump() for t in trains]}
+            )
+        if self._tube_store is not None:
+            tubes = await self._tube_store.snapshot()
+            await ws.send_json(
+                {"type": "tube_snapshot", "trains": [t.model_dump() for t in tubes]}
+            )
 
     def disconnect(self, ws: WebSocket) -> None:
         self._clients.discard(ws)
@@ -101,6 +118,10 @@ class Broadcaster:
             await self._tick_aircraft()
         if self._bus_store is not None:
             await self._tick_buses()
+        if self._train_store is not None:
+            await self._tick_trains()
+        if self._tube_store is not None:
+            await self._tick_tube()
 
     async def _tick_vessels(self) -> None:
         vessels = await self._store.snapshot()
@@ -167,6 +188,52 @@ class Broadcaster:
             {
                 "type": "bus_update",
                 "buses": [b.model_dump() for b in changed],
+                "removed": removed,
+            }
+        )
+
+    async def _tick_trains(self) -> None:
+        trains = await self._train_store.snapshot()
+        current_ids = {t.id for t in trains}
+
+        changed = [t for t in trains if self._last_sent_train.get(t.id) != t.ts]
+        removed = [i for i in self._last_sent_train if i not in current_ids]
+
+        for t in trains:
+            self._last_sent_train[t.id] = t.ts
+        for i in removed:
+            self._last_sent_train.pop(i, None)
+
+        if not changed and not removed:
+            return
+
+        await self._broadcast(
+            {
+                "type": "train_update",
+                "trains": [t.model_dump() for t in changed],
+                "removed": removed,
+            }
+        )
+
+    async def _tick_tube(self) -> None:
+        tubes = await self._tube_store.snapshot()
+        current_ids = {t.id for t in tubes}
+
+        changed = [t for t in tubes if self._last_sent_tube.get(t.id) != t.ts]
+        removed = [i for i in self._last_sent_tube if i not in current_ids]
+
+        for t in tubes:
+            self._last_sent_tube[t.id] = t.ts
+        for i in removed:
+            self._last_sent_tube.pop(i, None)
+
+        if not changed and not removed:
+            return
+
+        await self._broadcast(
+            {
+                "type": "tube_update",
+                "trains": [t.model_dump() for t in changed],
                 "removed": removed,
             }
         )

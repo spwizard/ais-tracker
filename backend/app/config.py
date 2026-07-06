@@ -69,6 +69,19 @@ class Settings(BaseSettings):
     bus_poll_sec: float = Field(default=12.0, alias="BUS_POLL_SEC")
     bus_ttl_sec: int = Field(default=60, alias="BUS_TTL_SEC")
 
+    # --- Rail: GB trains, Tier-1 inferred positions -------------------------
+    # Prototype: TRAIN_SIM=1 runs a simulated feed on real routes. The real
+    # feed is Darwin Push Port (free registration at opendata.nationalrail.co.uk);
+    # set the DARWIN_* credentials once granted.
+    enable_train: bool = Field(default=False, alias="ENABLE_TRAIN")
+    train_sim: bool = Field(default=True, alias="TRAIN_SIM")
+    darwin_host: str = Field(default="", alias="DARWIN_HOST")
+    darwin_user: str = Field(default="", alias="DARWIN_USER")
+    darwin_pass: str = Field(default="", alias="DARWIN_PASS")
+
+    # --- Land: London Underground (TfL — free, keyless; app_key raises limits) --
+    enable_tube: bool = Field(default=True, alias="ENABLE_TUBE")
+
     # --- Land: London traffic cameras (TfL JamCams — free, keyless) --------
     enable_cameras: bool = Field(default=True, alias="ENABLE_CAMERAS")
     tfl_jamcam_url: str = Field(

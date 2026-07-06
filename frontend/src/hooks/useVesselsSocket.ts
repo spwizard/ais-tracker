@@ -8,7 +8,10 @@ import type {
   ServerFrame,
   TrackedAircraft,
   TrackedBus,
+  TrackedTrain,
   TrackedVessel,
+  Train,
+  TubeTrain,
   Vessel,
 } from "@/types";
 import type { Geofence } from "@/geofence/types";
@@ -43,6 +46,10 @@ export function useVesselsSocket() {
   const aircraftRef = useRef<Map<string, TrackedAircraft>>(new Map());
   // Live London buses (BODS), keyed by vehicle id.
   const busesRef = useRef<Map<string, TrackedBus>>(new Map());
+  // Live GB trains (rail, Tier-1 inferred positions), keyed by service id.
+  const trainsRef = useRef<Map<string, TrackedTrain>>(new Map());
+  // Live Underground trains (TfL inference), keyed by line:vehicleId.
+  const tubeRef = useRef<Map<string, TubeTrain>>(new Map());
   const [version, setVersion] = useState(0);
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
   const [events, setEvents] = useState<GeofenceEvent[]>([]);
@@ -133,6 +140,26 @@ export function useVesselsSocket() {
     Object.assign(prev, b);
   }, []);
 
+  const applyTrain = useCallback((t: Train) => {
+    const map = trainsRef.current;
+    const prev = map.get(t.id);
+    if (!prev) {
+      map.set(t.id, t as TrackedTrain);
+      return;
+    }
+    Object.assign(prev, t); // in-place, same as the other domains
+  }, []);
+
+  const applyTube = useCallback((t: TubeTrain) => {
+    const map = tubeRef.current;
+    const prev = map.get(t.id);
+    if (!prev) {
+      map.set(t.id, t);
+      return;
+    }
+    Object.assign(prev, t);
+  }, []);
+
   // Client-side backstop eviction. Entities normally leave via the backend's
   // `removed` lists; if one is ever missed it would otherwise live (trail and
   // all) for the whole session. TTLs sit well above the backend's own.
@@ -148,6 +175,12 @@ export function useVesselsSocket() {
       }
       for (const [k, b] of busesRef.current) {
         if (now - b.ts > 300) { busesRef.current.delete(k); dropped++; }
+      }
+      for (const [k, t] of trainsRef.current) {
+        if (now - t.ts > 300) { trainsRef.current.delete(k); dropped++; }
+      }
+      for (const [k, t] of tubeRef.current) {
+        if (now - t.ts > 300) { tubeRef.current.delete(k); dropped++; }
       }
       if (dropped) scheduleRender();
     }, 60_000);
@@ -200,6 +233,18 @@ export function useVesselsSocket() {
         } else if (frame.type === "bus_update") {
           for (const b of frame.buses) applyBus(b);
           for (const id of frame.removed) busesRef.current.delete(id);
+        } else if (frame.type === "train_snapshot") {
+          trainsRef.current.clear();
+          for (const t of frame.trains) applyTrain(t);
+        } else if (frame.type === "train_update") {
+          for (const t of frame.trains) applyTrain(t);
+          for (const id of frame.removed) trainsRef.current.delete(id);
+        } else if (frame.type === "tube_snapshot") {
+          tubeRef.current.clear();
+          for (const t of frame.trains) applyTube(t);
+        } else if (frame.type === "tube_update") {
+          for (const t of frame.trains) applyTube(t);
+          for (const id of frame.removed) tubeRef.current.delete(id);
         } else if (frame.type === "geofence_event") {
           setEvents((prev) => [frame, ...prev].slice(0, MAX_EVENTS));
           return; // not a vessel update — no render bump needed
@@ -287,12 +332,14 @@ export function useVesselsSocket() {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       ws?.close();
     };
-  }, [applyVessel, applyAircraft, applyBus, scheduleRender]);
+  }, [applyVessel, applyAircraft, applyBus, applyTrain, applyTube, scheduleRender]);
 
   return {
     vesselsRef,
     aircraftRef,
     busesRef,
+    trainsRef,
+    tubeRef,
     version,
     status,
     events,

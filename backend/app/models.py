@@ -124,3 +124,56 @@ class Bus(BaseModel):
     bearing: Optional[float] = None  # degrees clockwise from north
 
     ts: float = 0.0  # last update (epoch seconds)
+
+
+class TubeTrain(BaseModel):
+    """One live London Underground train (positions inferred — see land/tube.py)."""
+
+    id: str  # "{lineId}:{vehicleId}"
+    line: str  # TfL line id, e.g. "victoria"
+    line_name: str  # display name, e.g. "Victoria"
+    towards: Optional[str] = None  # destination
+    next_station: Optional[str] = None
+    tts: Optional[float] = None  # seconds to next station
+    current_location: Optional[str] = None  # TfL's own words
+    lat: Optional[float] = None
+    lon: Optional[float] = None
+    bearing: Optional[float] = None
+    speed_kn: Optional[float] = None  # rough along-track speed (client glide)
+
+    ts: float = 0.0  # last update (epoch seconds)
+
+
+class TrainStop(BaseModel):
+    """One calling point on a train's route (detail panel + route line)."""
+
+    crs: str
+    name: str
+    lat: float
+    lon: float
+    t: float  # expected time at this stop (epoch seconds)
+
+
+class Train(BaseModel):
+    """Full current state for one train — rail (land domain).
+
+    Positions are INFERRED, not broadcast: trains report times at calling
+    points and the position is interpolated along the route between them
+    (straight-line for Tier 1). `sim` marks the prototype's simulated feed.
+    """
+
+    id: str  # service id (Darwin RID, or "sim:*" for the simulator)
+    headcode: Optional[str] = None  # e.g. "1A23"
+    operator: Optional[str] = None  # e.g. "GWR"
+    origin: Optional[str] = None
+    destination: Optional[str] = None
+    lat: Optional[float] = None
+    lon: Optional[float] = None
+    bearing: Optional[float] = None  # degrees clockwise from north
+    speed_kn: Optional[float] = None  # along-segment speed (client glide)
+    delay_min: Optional[float] = None
+    next_name: Optional[str] = None  # next calling point
+    stops: list[TrainStop] = []  # full calling pattern
+    sim: bool = False
+
+    ts: float = 0.0  # last update (epoch seconds)

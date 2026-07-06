@@ -302,6 +302,79 @@ export interface TrackedBus extends Bus {
   trail: [number, number, number][]; // [lon, lat, ts]
 }
 
+/** One calling point on a train's route. */
+export interface TrainStop {
+  crs: string;
+  name: string;
+  lat: number;
+  lon: number;
+  t: number; // expected time at this stop (epoch seconds)
+}
+
+/** A live GB train (rail domain). Positions are INFERRED by interpolating
+ *  between calling-point times — Tier-1 accuracy, straight-line between
+ *  stations. `sim` marks the prototype's simulated feed. */
+export interface Train {
+  id: string;
+  headcode: string | null;
+  operator: string | null;
+  origin: string | null;
+  destination: string | null;
+  lat: number | null;
+  lon: number | null;
+  bearing: number | null; // degrees clockwise from north
+  speed_kn: number | null; // along-segment speed (client-side glide)
+  delay_min: number | null;
+  next_name: string | null; // next calling point
+  stops: TrainStop[];
+  sim: boolean;
+  ts: number;
+}
+
+export type TrackedTrain = Train; // no client-side trail (route line instead)
+
+/** A GB railway station (for the rail layer's station markers). */
+export interface RailStation {
+  crs: string;
+  name: string;
+  lat: number;
+  lon: number;
+}
+
+/** One Underground line: official geometry + live status. */
+export interface TubeLine {
+  id: string; // TfL line id, e.g. "victoria"
+  name: string;
+  paths: [number, number][][]; // route polylines incl. branches [lon, lat]
+  status: string; // e.g. "Good Service", "Minor Delays"
+  severity: number; // TfL statusSeverity — 10 = good service
+}
+
+export interface TubeStation {
+  id: string;
+  name: string;
+  lat: number;
+  lon: number;
+  lines: string[]; // line ids serving this station
+}
+
+/** A live Underground train. Position is INFERRED from TfL's arrival
+ *  predictions (no GPS exists underground) — indicative by nature. */
+export interface TubeTrain {
+  id: string; // "{line}:{vehicleId}"
+  line: string;
+  line_name: string;
+  towards: string | null;
+  next_station: string | null;
+  tts: number | null; // seconds to next station
+  current_location: string | null; // TfL's own words
+  lat: number | null;
+  lon: number | null;
+  bearing: number | null;
+  speed_kn: number | null;
+  ts: number;
+}
+
 /** An airport in a flight route (from GET /api/aircraft/{hex}). */
 export interface Airport {
   name: string | null;
@@ -373,6 +446,10 @@ export type ServerFrame =
   | { type: "air_update"; aircraft: Aircraft[]; removed: string[] }
   | { type: "bus_snapshot"; buses: Bus[] }
   | { type: "bus_update"; buses: Bus[]; removed: string[] }
+  | { type: "train_snapshot"; trains: Train[] }
+  | { type: "train_update"; trains: Train[]; removed: string[] }
+  | { type: "tube_snapshot"; trains: TubeTrain[] }
+  | { type: "tube_update"; trains: TubeTrain[]; removed: string[] }
   | GeofenceEvent
   | RiskEvent
   | { type: "flagged"; mmsis: number[] }
