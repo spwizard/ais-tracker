@@ -35,10 +35,12 @@ export function buildGoogle3DLayer(onAttribution?: (text: string) => void) {
     }) => {
       if (tileset?.options) {
         tileset.options.maximumScreenSpaceError = 24; // higher = less detail/memory
-        // 256 MB cache: keeps the tab's footprint in check. Revisiting an area
-        // re-streams a little more than a larger cache would, but photoreal tiles
-        // are heavy, so this is the better default for overall memory.
-        tileset.options.maximumMemoryUsage = 256;
+        // 160 MB cache: keeps the tab's footprint in check. Revisiting an area
+        // re-streams a little more than a larger cache would, but photoreal
+        // tiles are heavy AND their memory lingers as heap/GPU overhang after
+        // leaving cinematic — a smaller cache shrinks both the peak and the
+        // hangover the rest of the session carries.
+        tileset.options.maximumMemoryUsage = 160;
       }
       const text = tileset?.credits?.copyright;
       if (text && onAttribution) onAttribution(text);
