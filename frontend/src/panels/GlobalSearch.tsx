@@ -60,6 +60,10 @@ export interface GlobalSearchProps {
   onSelectAlert: (a: Alert) => void;
   onJumpLocation: (loc: SearchLocation) => void;
   onSelectIntel: (intel: SearchIntel) => void;
+  /** Whether an event's vessel is still transmitting. Rows for vessels that
+   *  left coverage get a "not live" tag — clicking them zooms to where the
+   *  event happened but cannot highlight the vessel. */
+  isLive?: (mmsi: number | null) => boolean;
 }
 
 export function GlobalSearchContent({
@@ -68,6 +72,7 @@ export function GlobalSearchContent({
   onSelectAlert,
   onJumpLocation,
   onSelectIntel,
+  isLive,
 }: GlobalSearchProps) {
   const [query, setQuery] = useState("");
   const [tab, setTab] = useState<Tab>("all");
@@ -148,7 +153,13 @@ export function GlobalSearchContent({
               <CommandGroup heading="Events">
                 <SeeMore cat="events" total={counts.events} shown={results.events.length} />
                 {results.events.map((e) => (
-                  <EventRow key={e.id} e={e} q={query} onSelect={() => act(() => onSelectAlert(e))} />
+                  <EventRow
+                    key={e.id}
+                    e={e}
+                    q={query}
+                    live={isLive ? isLive(e.mmsi) : true}
+                    onSelect={() => act(() => onSelectAlert(e))}
+                  />
                 ))}
               </CommandGroup>
             )}
@@ -238,7 +249,17 @@ const EVENT_VERB: Record<string, string> = {
   dwell: "loitering in", speed: "speeding in", dark: "went dark in",
 };
 
-function EventRow({ e, q, onSelect }: { e: Alert; q: string; onSelect: () => void }) {
+function EventRow({
+  e,
+  q,
+  live,
+  onSelect,
+}: {
+  e: Alert;
+  q: string;
+  live: boolean;
+  onSelect: () => void;
+}) {
   const who = e.name ?? (e.mmsi != null ? `MMSI ${e.mmsi}` : "Unknown");
   const where = e.fence_name ? ` · ${EVENT_VERB[e.kind] ?? e.kind} ${e.fence_name}` : ` · ${EVENT_VERB[e.kind] ?? e.kind}`;
   return (
@@ -246,10 +267,18 @@ function EventRow({ e, q, onSelect }: { e: Alert; q: string; onSelect: () => voi
       <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-foreground/5">
         <Activity className="h-3.5 w-3.5 text-rose-400" />
       </span>
-      <span className="min-w-0 truncate">
+      <span className="min-w-0 flex-1 truncate">
         <span className="font-medium"><Highlight text={who} q={q} /></span>
         <span className="text-muted-foreground">{where}</span>
       </span>
+      {!live && (
+        <span
+          className="ml-auto shrink-0 rounded border border-foreground/15 px-1 py-px text-[9px] font-medium uppercase tracking-wide text-muted-foreground"
+          title="This vessel is no longer transmitting — clicking shows where the event happened"
+        >
+          not live
+        </span>
+      )}
     </CommandItem>
   );
 }

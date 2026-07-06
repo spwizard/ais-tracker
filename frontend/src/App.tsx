@@ -336,6 +336,12 @@ export default function App() {
     const b = busesRef.current.get(followBusId);
     if (b?.lat != null && b?.lon != null) mapRef.current?.panTo(b.lon, b.lat);
   }, [version, followBusId, busesRef]);
+  // Follow's only off-switch is the Follow button in the bus panel — if that
+  // panel closes or the bus is deselected, the map must stop chasing the bus
+  // (it used to keep panning forever with no visible way to stop it).
+  useEffect(() => {
+    if (!panels.bus.open || selectedBusId == null) setFollowBusId(null);
+  }, [panels.bus.open, selectedBusId]);
 
   // London traffic cameras — loaded once whenever the feature exists: the map
   // layer, the wall, bus fusion AND alert-eyes all draw on the same catalog.
@@ -875,6 +881,7 @@ export default function App() {
             onSelectAlert={onSelectAlert}
             onJumpLocation={onSearchLocation}
             onSelectIntel={onSearchIntel}
+            isLive={(m) => m != null && vesselsRef.current.has(m)}
           />
         </IslandDropdown>
 
@@ -1013,7 +1020,15 @@ export default function App() {
         )}
         <CameraWall
           open={wall.open}
-          onOpenChange={wall.setOpen}
+          onOpenChange={(v) => {
+            // Closing the wall ends its follow/eyes-on context — reopening
+            // later shouldn't surprise-resume tracking an old bus or alert.
+            if (!v) {
+              setWallBusFollow(null);
+              setWallContext(null);
+            }
+            wall.setOpen(v);
+          }}
           cameras={cameras}
           ids={wall.ids}
           onToggle={(id) => {
