@@ -100,8 +100,10 @@ def parse_pushport(payload: bytes) -> list[ServiceForecast]:
             tpl = loc.get("tpl") or ""
             if not tpl:
                 continue
-            # Prefer departure over arrival, actual (at) over estimate (et).
-            best: tuple[float, bool] | None = None
+            # Departure beats arrival/pass (it anchors when the train LEAVES a
+            # stop, which is what interpolation needs); within the same kind an
+            # actual (at) beats an estimate (et) — and never the reverse.
+            best: tuple[float, bool, bool] | None = None  # (t, actual, is_dep)
             for child in loc:
                 name = _strip(child.tag)
                 if name not in ("arr", "dep", "pass"):
@@ -113,9 +115,15 @@ def parse_pushport(payload: bytes) -> list[ServiceForecast]:
                     t = _parse_hhmm(base, v, prev_t)
                     if t is None:
                         continue
-                    # dep beats arr at the same stop; actual beats estimate.
-                    if best is None or (actual and not best[1]) or name == "dep":
-                        best = (t, actual)
+                    is_dep = name == "dep"
+                    if best is None:
+                        best = (t, actual, is_dep)
+                    else:
+                        _, b_actual, b_dep = best
+                        if (is_dep and not b_dep) or (
+                            is_dep == b_dep and actual and not b_actual
+                        ):
+                            best = (t, actual, is_dep)
                 delay = child.get("delay")  # minutes, when Darwin supplies it
                 if delay is not None:
                     try:

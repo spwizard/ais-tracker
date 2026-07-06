@@ -58,3 +58,18 @@ def test_past_midnight_rollover():
     s = parse_pushport(frame)[0]
     ts = [l.t for l in s.locations]
     assert ts == sorted(ts)  # 00:20 resolved to the NEXT day, after 23:52
+
+
+def test_departure_estimate_beats_actual_arrival_but_not_actual_departure():
+    # Interpolation anchors on when the train LEAVES a stop: an estimated
+    # departure outranks an actual arrival — but an estimate must never
+    # replace an actual of the same kind.
+    frame = SAMPLE.replace(
+        b'<dep et="10:30" delay="3"/>',
+        b'<arr at="10:28"/><dep at="10:29"/><dep et="10:31" delay="3"/>',
+    )
+    s = parse_pushport(frame)[0]
+    rdg = s.locations[1]
+    base = datetime(2026, 7, 6, tzinfo=timezone.utc).timestamp()
+    assert rdg.actual is True  # the actual dep (10:29) survived the later estimate
+    assert abs(rdg.t - (base + 10 * 3600 + 29 * 60)) < 1

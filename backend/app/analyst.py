@@ -417,7 +417,14 @@ class AnalystService:
         ]
         lat, lon = p.get("lat"), p.get("lon")
         if lat is not None and lon is not None:
-            out.sort(key=lambda c: (c["lat"] - lat) ** 2 + (c["lon"] - lon) ** 2)
+            import math
+
+            # Scale longitude by cos(lat) so "nearest" is honest — a degree of
+            # longitude is only ~60% of a degree of latitude at London.
+            k = math.cos(math.radians(lat))
+            out.sort(
+                key=lambda c: (c["lat"] - lat) ** 2 + ((c["lon"] - lon) * k) ** 2
+            )
         limit = max(1, min(int(p.get("limit") or 8), 15))
         return {
             "total_matching": len(out),
