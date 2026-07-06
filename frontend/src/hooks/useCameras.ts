@@ -18,23 +18,35 @@ export function useCameras(enabled: boolean): Camera[] {
       return;
     }
     let cancelled = false;
-    if (!inflight) {
-      inflight = fetch(`${API_URL}/api/cameras`)
-        .then((r) => r.json())
-        .then((d: { cameras: Camera[] }) => {
-          cache = d.cameras ?? [];
-          return cache;
+    let retry: number | undefined;
+    const load = () => {
+      if (!inflight) {
+        inflight = fetch(`${API_URL}/api/cameras`)
+          .then((r) => r.json())
+          .then((d: { cameras: Camera[] }) => {
+            cache = d.cameras ?? [];
+            return cache;
+          })
+          .catch((e) => {
+            // Never cache a failure: a fetch fired while offline (e.g. right
+            // after the laptop wakes) used to park a rejected promise here
+            // forever, leaving cameras empty until a full page reload.
+            inflight = null;
+            throw e;
+          });
+      }
+      inflight
+        .then((c) => {
+          if (!cancelled) setCameras(c);
+        })
+        .catch(() => {
+          if (!cancelled) retry = window.setTimeout(load, 15_000);
         });
-    }
-    inflight
-      .then((c) => {
-        if (!cancelled) setCameras(c);
-      })
-      .catch(() => {
-        if (!cancelled) setCameras([]);
-      });
+    };
+    load();
     return () => {
       cancelled = true;
+      if (retry) clearTimeout(retry);
     };
   }, [enabled]);
 

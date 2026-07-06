@@ -159,6 +159,7 @@ export function useVesselsSocket() {
     let closedByUs = false;
     let reconnectTimer: number | undefined;
     let backoff = 1000;
+    let lastMsg = Date.now();
 
     const connect = () => {
       // The effect may already have been torn down (StrictMode double-mount, or
@@ -169,10 +170,12 @@ export function useVesselsSocket() {
 
       ws.onopen = () => {
         backoff = 1000;
+        lastMsg = Date.now();
         setStatus("open");
       };
 
       ws.onmessage = (ev) => {
+        lastMsg = Date.now();
         let frame: ServerFrame;
         try {
           frame = JSON.parse(ev.data);
@@ -226,6 +229,44 @@ export function useVesselsSocket() {
       ws.onerror = () => ws?.close();
     };
 
+    // Reconnect NOW, resetting the backoff — used when we know the world just
+    // changed (network came back, laptop woke) rather than waiting out a timer
+    // that may itself have been throttled while the tab was hidden.
+    const forceReconnect = () => {
+      if (closedByUs) return;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      backoff = 1000;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.close(); // onclose schedules the reconnect (1s after reset)
+      } else if (!ws || ws.readyState === WebSocket.CLOSED) {
+        connect();
+      }
+      // CONNECTING/CLOSING: let the in-flight transition finish; its own
+      // onclose/onopen handlers take it from here.
+    };
+
+    // Sleep/wake guard: suspending the machine kills TCP silently — the socket
+    // can sit at readyState OPEN forever without an onclose. Updates normally
+    // arrive every second, so a socket that is "open" but silent for 30s is a
+    // zombie: close it to trigger the normal reconnect path.
+    const STALE_MS = 30_000;
+    const watchdog = window.setInterval(() => {
+      if (ws && ws.readyState === WebSocket.OPEN && Date.now() - lastMsg > STALE_MS) {
+        ws.close();
+      }
+    }, 10_000);
+
+    // Fast-path recovery the moment the browser tells us connectivity returned
+    // or the user came back to a possibly-stale tab.
+    const onOnline = () => forceReconnect();
+    const onVisible = () => {
+      if (document.hidden) return;
+      const stale = ws?.readyState === WebSocket.OPEN && Date.now() - lastMsg > STALE_MS;
+      if (stale || !ws || ws.readyState === WebSocket.CLOSED) forceReconnect();
+    };
+    window.addEventListener("online", onOnline);
+    document.addEventListener("visibilitychange", onVisible);
+
     // Warm-start from REST so the map is populated before the first WS frame.
     fetch(`${API_URL}/api/snapshot`)
       .then((r) => r.json())
@@ -239,6 +280,9 @@ export function useVesselsSocket() {
 
     return () => {
       closedByUs = true;
+      clearInterval(watchdog);
+      window.removeEventListener("online", onOnline);
+      document.removeEventListener("visibilitychange", onVisible);
       if (reconnectTimer) clearTimeout(reconnectTimer);
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       ws?.close();
