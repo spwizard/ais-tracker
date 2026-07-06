@@ -18,7 +18,12 @@ import { Map } from "react-map-gl/maplibre";
 import type {
   TrackedVessel,
   TrackedAircraft,
+  RailStation,
   TrackedBus,
+  TrackedTrain,
+  TubeLine,
+  TubeStation,
+  TubeTrain,
   Camera,
   DensityPoint,
   WeatherMeta,
@@ -30,6 +35,8 @@ import { buildLayers } from "./layers";
 import { buildAircraftLayers, buildRouteLayers, type AirRoute } from "./aircraftLayers";
 import { buildCameraLayers } from "./cameraLayers";
 import { buildBusLayers } from "./busLayers";
+import { buildTrainLayers } from "./trainLayers";
+import { buildTubeLayers, tubeColor } from "./tubeLayers";
 import { ScatterplotLayer, TextLayer } from "@deck.gl/layers";
 import { buildReplayLayers, type TrailMode, type ColorMode } from "./replayLayers";
 import { advanceClock } from "./replayMath";
@@ -138,6 +145,16 @@ interface MapViewProps {
   showBus: boolean;
   onSelectBus: (b: TrackedBus | null) => void;
   selectedBusId: string | null;
+  // GB trains (rail, Tier-1 inferred positions).
+  trains: TrackedTrain[];
+  stations: RailStation[];
+  showTrain: boolean;
+  onSelectTrain: (t: TrackedTrain | null) => void;
+  selectedTrainId: string | null;
+  // London Underground layer.
+  tubeNetwork: { lines: TubeLine[]; stations: TubeStation[] };
+  tubeTrains: TubeTrain[];
+  showTube: boolean;
   // The camera the selected bus is heading toward next — pulse a ring on it.
   nextCameraPos: [number, number] | null;
 }
@@ -210,6 +227,14 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
     showBus,
     onSelectBus,
     selectedBusId,
+    trains,
+    stations,
+    showTrain,
+    onSelectTrain,
+    selectedTrainId,
+    tubeNetwork,
+    tubeTrains,
+    showTube,
     nextCameraPos,
   } = props;
 
@@ -502,6 +527,27 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
             onClick: onSelectBus,
           })
         : []),
+      // GB trains (rail) — visible from national zoom.
+      ...(showTrain
+        ? buildTrainLayers({
+            trains,
+            stations,
+            currentTime,
+            zoom,
+            selectedId: selectedTrainId,
+            onClick: onSelectTrain,
+          })
+        : []),
+      // London Underground — the network as light, once London fills the view.
+      ...(showTube
+        ? buildTubeLayers({
+            network: tubeNetwork,
+            trains: tubeTrains,
+            currentTime,
+            zoom,
+            onClickTrain: () => void 0,
+          })
+        : []),
       // Pulsing ring on the camera the selected bus is heading toward next.
       ...(nextCameraPos ? buildNextCameraRing(nextCameraPos, currentTime) : []),
     ],
@@ -534,6 +580,14 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
       showBus,
       selectedBusId,
       onSelectBus,
+      trains,
+      stations,
+      showTrain,
+      selectedTrainId,
+      onSelectTrain,
+      tubeNetwork,
+      tubeTrains,
+      showTube,
       nextCameraPos,
       densityMode,
       drawing,
@@ -619,6 +673,19 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
             ? buildAircraftTooltip(object as TrackedAircraft)
             : object && (object as Camera).image
               ? buildCameraTooltip(object as Camera)
+              : object && (object as TubeTrain).line_name !== undefined
+                ? buildTubeTrainTooltip(object as TubeTrain)
+              : object && (object as { lineId?: string; status?: string }).lineId !== undefined &&
+                  (object as { status?: string }).status !== undefined
+                ? buildTubeLineTooltip(object as { name: string; status: string; lineId: string })
+              : object && (object as TubeStation).lines !== undefined
+                ? buildTubeStationTooltip(object as TubeStation)
+              : object && (object as RailStation).crs !== undefined &&
+                  (object as TrackedTrain).headcode === undefined
+                ? buildStationTooltip(object as RailStation)
+              : object && (object as TrackedTrain).headcode !== undefined &&
+                  (object as TrackedTrain).stops !== undefined
+                ? buildTrainTooltip(object as TrackedTrain)
               : object && (object as TrackedBus).route !== undefined &&
                   (object as TrackedBus).operator !== undefined
                 ? buildBusTooltip(object as TrackedBus)
@@ -638,6 +705,7 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
           onSelectAircraft(null);
           onSelectCamera(null);
           onSelectBus(null);
+          onSelectTrain(null);
         }
       }}
       // Attach drag/hover handlers ONLY while drawing a geofence. When they're
@@ -833,6 +901,87 @@ function buildNextCameraRing(pos: [number, number], t: number) {
       getAlignmentBaseline: "bottom",
     }),
   ];
+}
+
+function buildTubeTrainTooltip(t: TubeTrain) {
+  const c = tubeColor(t.line);
+  const eta = t.tts != null ? (t.tts < 60 ? `${Math.round(t.tts)}s` : `${Math.round(t.tts / 60)} min`) : "";
+  return {
+    html: `
+      <div style="font-family:Inter,system-ui,sans-serif;min-width:180px">
+        <div style="display:flex;align-items:center;gap:6px;font-weight:600;margin-bottom:2px">
+          <span style="width:10px;height:10px;border-radius:9999px;background:rgb(${c[0]},${c[1]},${c[2]})"></span>
+          ${escapeHtml(t.line_name)} line${t.towards ? ` → ${escapeHtml(t.towards)}` : ""}
+        </div>
+        <div style="opacity:.75;font-size:11px">${escapeHtml(t.current_location ?? "")}</div>
+        ${t.next_station ? `<div style="opacity:.75;font-size:11px">Next: ${escapeHtml(t.next_station)}${eta ? ` · ${eta}` : ""}</div>` : ""}
+      </div>`,
+    style: tooltipStyle(),
+  };
+}
+
+function buildTubeLineTooltip(l: { name: string; status: string; lineId: string }) {
+  const c = tubeColor(l.lineId);
+  const good = l.status === "Good Service";
+  return {
+    html: `
+      <div style="font-family:Inter,system-ui,sans-serif">
+        <div style="display:flex;align-items:center;gap:6px;font-weight:600">
+          <span style="width:10px;height:10px;border-radius:9999px;background:rgb(${c[0]},${c[1]},${c[2]})"></span>
+          ${escapeHtml(l.name)} line
+        </div>
+        <div style="font-size:11px;color:${good ? "#34d399" : "#fbbf24"}">${escapeHtml(l.status)}</div>
+      </div>`,
+    style: tooltipStyle(),
+  };
+}
+
+function buildTubeStationTooltip(st: TubeStation) {
+  const dots = st.lines
+    .map((l) => {
+      const c = tubeColor(l);
+      return `<span style="width:8px;height:8px;border-radius:9999px;background:rgb(${c[0]},${c[1]},${c[2]});display:inline-block;margin-right:3px"></span>`;
+    })
+    .join("");
+  return {
+    html: `
+      <div style="font-family:Inter,system-ui,sans-serif">
+        <div style="font-weight:600">${escapeHtml(st.name)}</div>
+        <div style="margin-top:3px">${dots}</div>
+      </div>`,
+    style: tooltipStyle(),
+  };
+}
+
+function buildStationTooltip(st: RailStation) {
+  return {
+    html: `
+      <div style="font-family:Inter,system-ui,sans-serif">
+        <div style="font-weight:600">${escapeHtml(st.name)}</div>
+        <div style="opacity:.7;font-size:11px">Station · ${escapeHtml(st.crs)}</div>
+      </div>`,
+    style: tooltipStyle(),
+  };
+}
+
+function buildTrainTooltip(t: TrackedTrain) {
+  const late = t.delay_min ?? 0;
+  const status = late >= 1
+    ? `<span style="color:${late >= 5 ? "#f43f5e" : "#fbbf24"}">${Math.round(late)} min late</span>`
+    : '<span style="color:#34d399">on time</span>';
+  return {
+    html: `
+      <div style="font-family:Inter,system-ui,sans-serif;min-width:170px">
+        <div style="display:flex;align-items:center;gap:6px;font-weight:600;margin-bottom:2px">
+          <span style="min-width:18px;height:16px;padding:0 4px;border-radius:4px;background:#334155;color:#fff;font-size:11px;font-weight:700;display:inline-flex;align-items:center;justify-content:center">${escapeHtml(t.headcode ?? "?")}</span>
+          ${escapeHtml(t.origin ?? "")} → ${escapeHtml(t.destination ?? "")}
+        </div>
+        <div style="opacity:.7;font-size:11px">
+          ${escapeHtml(t.operator ?? "")} · ${status}${t.sim ? " · simulated" : ""}
+        </div>
+      </div>`,
+    style: tooltipStyle(),
+  };
 }
 
 function buildBusTooltip(b: TrackedBus) {

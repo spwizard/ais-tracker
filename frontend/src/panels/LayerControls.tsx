@@ -15,6 +15,8 @@ import {
   Bus,
   ChevronDown,
   type LucideIcon,
+  TrainFront,
+  TramFront,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
@@ -39,8 +41,14 @@ interface LayerControlsProps {
   onToggleAir: (v: boolean) => void;
   airAvailable: boolean;
   showBus: boolean;
+  showTrain: boolean;
+  showTube: boolean;
   onToggleBus: (v: boolean) => void;
+  onToggleTrain: (v: boolean) => void;
+  onToggleTube: (v: boolean) => void;
   busAvailable: boolean;
+  trainAvailable: boolean;
+  tubeAvailable: boolean;
   showCameras: boolean;
   onToggleCameras: (v: boolean) => void;
   camerasAvailable: boolean;
@@ -142,8 +150,14 @@ export function LayerControls({
   onToggleAir,
   airAvailable,
   showBus,
+  showTrain,
+  showTube,
   onToggleBus,
+  onToggleTrain,
+  onToggleTube,
   busAvailable,
+  trainAvailable,
+  tubeAvailable,
   showCameras,
   onToggleCameras,
   camerasAvailable,
@@ -194,7 +208,7 @@ export function LayerControls({
           </Section>
         )}
 
-        {(busAvailable || camerasAvailable) && (
+        {(busAvailable || camerasAvailable || trainAvailable || tubeAvailable) && (
           <Section title="Land">
             {busAvailable && (
               <Row
@@ -203,6 +217,24 @@ export function LayerControls({
                 hint="Live TfL buses — zoom into London, then click one to follow it."
                 checked={showBus}
                 onChange={onToggleBus}
+              />
+            )}
+            {tubeAvailable && (
+              <Row
+                icon={TramFront}
+                label="London Underground"
+                hint="The tube network as light: official line colours, live status, and every train inferred from TfL arrivals."
+                checked={showTube}
+                onChange={onToggleTube}
+              />
+            )}
+            {trainAvailable && (
+              <Row
+                icon={TrainFront}
+                label="Trains (GB · beta)"
+                hint="Tier-1 rail: positions interpolated between calling points. Prototype runs a simulated feed on real routes."
+                checked={showTrain}
+                onChange={onToggleTrain}
               />
             )}
             {camerasAvailable && (

@@ -8,6 +8,7 @@ export type PanelId =
   | "aircraft"
   | "camera"
   | "bus"
+  | "train"
   | "zones"
   | "analyst";
 
@@ -19,6 +20,7 @@ export const PANEL_IDS: PanelId[] = [
   "aircraft",
   "camera",
   "bus",
+  "train",
   "zones",
   "analyst",
 ];
@@ -32,6 +34,7 @@ export const PANEL_W: Record<PanelId, number> = {
   aircraft: 380,
   camera: 360,
   bus: 340,
+  train: 340,
   zones: 288,
   analyst: 380,
 };
@@ -45,6 +48,7 @@ export const PANEL_EST_H: Record<PanelId, number> = {
   aircraft: 440,
   camera: 330,
   bus: 320,
+  train: 400,
   zones: 360,
   analyst: 540,
 };
@@ -105,6 +109,11 @@ function defaults(): PanelMap {
     bus: {
       open: false,
       x: vw - MARGIN - PANEL_W.bus,
+      y: MARGIN + PANEL_EST_H.stats + GAP,
+    },
+    train: {
+      open: false,
+      x: vw - MARGIN - PANEL_W.train,
       y: MARGIN + PANEL_EST_H.stats + GAP,
     },
     zones: {

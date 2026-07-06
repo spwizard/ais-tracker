@@ -52,11 +52,17 @@ from .weather_point import WindyPoint
 from .ship_types import SHIP_TYPE_GROUPS
 from .air.enrich import AircraftEnricher
 from .land.cameras import CameraCatalog
+from .land.tube import TubeNetwork
 from .land.vision import CameraAnalyst, VisionUnavailable
 from .sources import AdsbLolSource, BodsSource, create_sources
+from .sources.darwin import DarwinSource
+from .sources.rail_sim import SimRailSource
+from .sources.tube import TubeSource
 from .store import create_store
 from .store.aircraft import AircraftStore
 from .store.bus import BusStore
+from .store.train import TrainStore
+from .store.tube import TubeStore
 from .ws.broadcaster import Broadcaster
 
 logging.basicConfig(
@@ -208,6 +214,15 @@ async def lifespan(app: FastAPI):
     if bus_store is not None:
         await bus_store.start()
     app.state.bus_store = bus_store
+    # Rail domain: GB trains, Tier-1 interpolated positions (sim or Darwin).
+    train_store = TrainStore() if settings.enable_train else None
+    if train_store is not None:
+        await train_store.start()
+    app.state.train_store = train_store
+    # Land domain: London Underground (TfL) — inferred live positions.
+    tube_store = TubeStore() if settings.enable_tube else None
+    app.state.tube_store = tube_store
+    app.state.tube_network = TubeNetwork(settings.tfl_app_key) if settings.enable_tube else None
     # Aircraft enrichment (registration / operator / route / photo) via adsbdb.
     app.state.air_enricher = AircraftEnricher() if settings.enable_air else None
     # Land domain: London traffic cameras (TfL JamCams), lazily fetched + cached.
@@ -224,7 +239,9 @@ async def lifespan(app: FastAPI):
     )
 
     broadcaster = Broadcaster(
-        store, settings.broadcast_hz, air_store=air_store, bus_store=bus_store
+        store, settings.broadcast_hz,
+        air_store=air_store, bus_store=bus_store, train_store=train_store,
+        tube_store=tube_store,
     )
     broadcaster.start()
     app.state.broadcaster = broadcaster
@@ -253,6 +270,14 @@ async def lifespan(app: FastAPI):
         sources.append(AdsbLolSource(air_store, settings))
     if bus_store is not None:
         sources.append(BodsSource(bus_store, settings))
+    if train_store is not None:
+        # Sim feed for the Tier-1 prototype; Darwin takes over once configured.
+        if settings.darwin_host and settings.darwin_user:
+            sources.append(DarwinSource(train_store, settings))
+        elif settings.train_sim:
+            sources.append(SimRailSource(train_store, settings))
+    if tube_store is not None:
+        sources.append(TubeSource(tube_store, app.state.tube_network, settings))
     for src in sources:
         src.start()
     app.state.sources = sources
@@ -464,6 +489,8 @@ async def healthz():
         "vessels": await app.state.store.count(),
         "aircraft": await app.state.air_store.count() if app.state.air_store else 0,
         "buses": await app.state.bus_store.count() if app.state.bus_store else 0,
+        "trains": await app.state.train_store.count() if app.state.train_store else 0,
+        "tube": await app.state.tube_store.count() if app.state.tube_store else 0,
         "clients": app.state.broadcaster.client_count,
         "registry": app.state.registry.count() if app.state.registry else 0,
         "data": {
@@ -473,6 +500,29 @@ async def healthz():
             "briefing_ready": bool(settings.anthropic_api_key),
         },
     }
+
+
+@app.get("/api/stations")
+async def rail_stations():
+    """GB railway stations (CRS + name + position) for the rail layer."""
+    if app.state.train_store is None:
+        return {"stations": []}
+    from .rail.stations import stations_by_crs
+
+    return {
+        "stations": [
+            {"crs": s.crs, "name": s.name, "lat": s.lat, "lon": s.lon}
+            for s in stations_by_crs().values()
+        ]
+    }
+
+
+@app.get("/api/tube/network")
+async def tube_network():
+    """Underground line geometry + stations + status for the tube layer."""
+    if app.state.tube_network is None:
+        return {"lines": [], "stations": []}
+    return await app.state.tube_network.payload()
 
 
 @app.get("/api/flags")
@@ -486,6 +536,10 @@ async def feature_flags():
     flags["bus"] = bool(app.state.settings.enable_bus and app.state.settings.bods_api_key)
     # London traffic cameras available when the TfL feed is enabled server-side.
     flags["cameras"] = bool(app.state.settings.enable_cameras)
+    # GB trains (Tier-1 prototype): sim feed or Darwin credentials.
+    flags["train"] = bool(app.state.settings.enable_train)
+    # London Underground layer (TfL, keyless).
+    flags["tube"] = bool(app.state.settings.enable_tube)
     return {"flags": flags}
 
 

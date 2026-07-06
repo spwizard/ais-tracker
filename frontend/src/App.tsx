@@ -19,10 +19,13 @@ import type { AirRoute } from "@/map/aircraftLayers";
 import { CameraView } from "@/panels/CameraView";
 import { CameraWall } from "@/panels/CameraWall";
 import { BusDetail } from "@/panels/BusDetail";
+import { TrainDetail } from "@/panels/TrainDetail";
 import { useCameras } from "@/hooks/useCameras";
+import { useStations } from "@/hooks/useStations";
+import { useTubeNetwork } from "@/hooks/useTubeNetwork";
 import { useCameraWall } from "@/hooks/useCameraWall";
 import { nearbyCameras, nextCameraAhead } from "@/lib/nearbyCameras";
-import type { Camera, TrackedBus } from "@/types";
+import type { Camera, TrackedBus, TrackedTrain, TubeTrain } from "@/types";
 import { MapControls } from "@/panels/MapControls";
 import { ZonesPanel } from "@/panels/ZonesPanel";
 import { DrawToolbar } from "@/panels/DrawToolbar";
@@ -71,7 +74,7 @@ const SEARCH_API = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 const SEARCH_TRACK_COLOR: [number, number, number] = [180, 210, 255];
 
 export default function App() {
-  const { vesselsRef, aircraftRef, busesRef, version, status, events, riskEvents, flagged, geofenceSync, setTrailGate } =
+  const { vesselsRef, aircraftRef, busesRef, trainsRef, tubeRef, version, status, events, riskEvents, flagged, geofenceSync, setTrailGate } =
     useVesselsSocket();
   const { panels, setOpen, toggle, togglePin, move, focus, zIndexOf, autoPlace } =
     usePanels();
@@ -95,6 +98,13 @@ export default function App() {
   const wall = useCameraWall(); // multi-feed camera wall (grid of up to 12)
   const [showBus, setShowBus] = useState(false); // London buses layer
   const busAvailable = useFlag("bus");
+  const [showTrain, setShowTrain] = useState(false); // GB trains layer (rail)
+  const trainAvailable = useFlag("train");
+  const [selectedTrainId, setSelectedTrainId] = useState<string | null>(null);
+  const railStations = useStations(showTrain);
+  const [showTube, setShowTube] = useState(false); // London Underground layer
+  const tubeAvailable = useFlag("tube");
+  const tubeNetwork = useTubeNetwork(showTube);
   const [selectedBusId, setSelectedBusId] = useState<string | null>(null);
   const [followBusId, setFollowBusId] = useState<string | null>(null);
   const [wallBusFollow, setWallBusFollow] = useState<string | null>(null); // wall tracks this bus
@@ -329,6 +339,33 @@ export default function App() {
     () => (selectedBusId ? busesRef.current.get(selectedBusId) ?? null : null),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [selectedBusId, version, busesRef],
+  );
+
+  // GB trains — materialized only while the layer is on, same version bump.
+  const trains = useMemo<TrackedTrain[]>(() => {
+    if (!showTrain) return [];
+    const out: TrackedTrain[] = [];
+    for (const t of trainsRef.current.values()) {
+      if (t.lat != null && t.lon != null) out.push(t);
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [version, trainsRef, showTrain]);
+  // Underground trains — materialized only while the layer is on.
+  const tubeTrains = useMemo<TubeTrain[]>(() => {
+    if (!showTube) return [];
+    const out: TubeTrain[] = [];
+    for (const t of tubeRef.current.values()) {
+      if (t.lat != null && t.lon != null) out.push(t);
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [version, tubeRef, showTube]);
+
+  const selectedTrain = useMemo(
+    () => (selectedTrainId ? trainsRef.current.get(selectedTrainId) ?? null : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selectedTrainId, version, trainsRef],
   );
   // Follow mode: gently keep the followed bus in view as it moves.
   useEffect(() => {
@@ -686,6 +723,18 @@ export default function App() {
     }
   };
 
+  // Train selection → the train detail panel.
+  const selectTrain = (t: TrackedTrain | null) => {
+    setSelectedTrainId(t?.id ?? null);
+    if (t) {
+      setOpen("train", true);
+      autoPlace("train");
+      focus("train");
+    } else {
+      setOpen("train", false);
+    }
+  };
+
   // Camera selection → the live camera view panel.
   const selectCamera = (c: Camera | null) => {
     setSelectedCameraId(c?.id ?? null);
@@ -834,6 +883,14 @@ export default function App() {
         showBus={showBus}
         onSelectBus={selectBus}
         selectedBusId={selectedBusId}
+        trains={trains}
+        stations={railStations}
+        showTrain={showTrain}
+        tubeNetwork={tubeNetwork}
+        tubeTrains={tubeTrains}
+        showTube={showTube}
+        onSelectTrain={selectTrain}
+        selectedTrainId={selectedTrainId}
         nextCameraPos={nextCameraPos}
       />
 
@@ -856,6 +913,7 @@ export default function App() {
             aircraft: panels.aircraft.open,
             camera: panels.camera.open,
             bus: panels.bus.open,
+            train: panels.train.open,
             zones: panels.zones.open,
             analyst: panels.analyst.open,
           }}
@@ -933,6 +991,12 @@ export default function App() {
             airAvailable={airAvailable}
             showBus={showBus}
             onToggleBus={setShowBus}
+            showTrain={showTrain}
+            onToggleTrain={setShowTrain}
+            trainAvailable={trainAvailable}
+            showTube={showTube}
+            onToggleTube={setShowTube}
+            tubeAvailable={tubeAvailable}
             busAvailable={busAvailable}
             showCameras={showCameras}
             onToggleCameras={setShowCameras}
@@ -1001,6 +1065,19 @@ export default function App() {
               wall.replace(busNearby.map((c) => c.camera.id));
               wall.setOpen(true);
             }}
+          />
+        )}
+        {panels.train.open && selectedTrain && (
+          <TrainDetail
+            chrome={chromeFor("train")}
+            train={selectedTrain}
+            onZoomTo={() =>
+              mapRef.current?.flyTo({
+                longitude: selectedTrain.lon as number,
+                latitude: selectedTrain.lat as number,
+                zoom: 11,
+              })
+            }
           />
         )}
         {panels.camera.open && selectedCamera && (
