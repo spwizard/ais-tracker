@@ -27,6 +27,8 @@ import type { ViewTarget } from "@/map/MapView";
 
 interface LayerControlsProps {
   chrome: PanelChrome;
+  showVessels: boolean;
+  onToggleVessels: (v: boolean) => void;
   showTrails: boolean;
   onToggleTrails: (v: boolean) => void;
   densityMode: boolean;
@@ -136,8 +138,11 @@ function Row({
 
 export function LayerControls({
   chrome,
+  showVessels,
+  onToggleVessels,
   showTrails,
   onToggleTrails,
+  // (trails toggle parked — see the commented row in the Sea section)
   densityMode,
   onToggleDensity,
   showWind,
@@ -171,11 +176,23 @@ export function LayerControls({
   onToggleCinematic,
   onJump,
 }: LayerControlsProps) {
+  void showTrails;
+  void onToggleTrails; // parked with the commented trails row below
   return (
     <FloatingPanel title="Layers & regions" icon={Layers} width={240} {...chrome}>
       <div className="space-y-2 p-3">
         <Section title="Sea">
+          <Row
+            icon={Route}
+            label="Vessels"
+            hint="Show or hide the live vessel picture (AIS)."
+            checked={showVessels}
+            onChange={onToggleVessels}
+          />
+          {/* Trails temporarily parked — the toggle spot now shows/hides vessels.
+              Re-enable by restoring this row (state + plumbing are all intact):
           <Row icon={Route} label="Vessel trails" checked={showTrails} onChange={onToggleTrails} />
+          */}
           <Row
             icon={Flame}
             label="Density heatmap"

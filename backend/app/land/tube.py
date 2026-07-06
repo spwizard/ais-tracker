@@ -90,6 +90,35 @@ class LineGeo:
                 return val
         return None
 
+    def along_bearing(
+        self, pt: tuple[float, float], toward: tuple[float, float] | None
+    ) -> float | None:
+        """The track's own direction at `pt` (lon, lat) — for trains where we
+        only know a single point. `toward` (e.g. the destination) picks which
+        of the two ways along the track to face; without it the choice is a
+        coin flip, but along-the-line beats pointing across it either way."""
+        best: tuple[list[tuple[float, float]], int] | None = None
+        best_d = 400.0
+        for path in self.paths:
+            i = min(range(len(path)), key=lambda k: _dist_m(path[k], pt))
+            d = _dist_m(path[i], pt)
+            if d < best_d:
+                best_d = d
+                best = (path, i)
+        if best is None:
+            return None
+        path, i = best
+        a = path[max(i - 1, 0)]
+        b = path[min(i + 1, len(path) - 1)]
+        if a == b:
+            return None
+        brg = _bearing(a, b)
+        if toward is not None:
+            want = _bearing(pt, toward)
+            if abs((brg - want + 180.0) % 360.0 - 180.0) > 90.0:
+                brg = (brg + 180.0) % 360.0
+        return brg
+
     def subpath_point(
         self, a: tuple[float, float], b: tuple[float, float], frac: float
     ) -> tuple[float, float, float] | None:
@@ -132,10 +161,15 @@ _NEAR = re.compile(r"^(?:approaching|departing|departed|left|leaving)\s+(.+)$", 
 
 
 def infer_position(
-    geo: LineGeo, current_location: str | None, next_station: str, tts: float
+    geo: LineGeo,
+    current_location: str | None,
+    next_station: str,
+    tts: float,
+    towards: str | None = None,
 ) -> tuple[float, float, float, float] | None:
     """(lat, lon, bearing, speed_kn) for one train, or None if unplaceable."""
     nxt = geo.station_by_prefix(next_station)
+    dest = geo.station_by_prefix(towards) if towards else None
     loc = (current_location or "").strip()
 
     m = _BETWEEN.search(loc)
@@ -147,7 +181,7 @@ def infer_position(
         if a and nxt:
             frac = 1.0 - min(max(tts / SEG_TYPICAL_SEC, 0.0), 1.0)
             frac = min(max(frac, 0.03), 0.97)
-            target = nxt if nxt else b
+            target = nxt
             pt = geo.subpath_point((a[2], a[1]), (target[2], target[1]), frac)
             if pt:
                 seg_len = _dist_m((a[2], a[1]), (target[2], target[1]))
@@ -162,10 +196,25 @@ def infer_position(
     if m:
         st = geo.station_by_prefix(m.group(1))
         if st:
-            return st[1], st[2], 0.0, 0.0
+            # Face along the track rather than defaulting north — a wedge
+            # pointing across its own line reads as noise. Aim at the next
+            # stop when it's a different station; when the "next station" IS
+            # this one (sitting at the platform), fall back to the track's
+            # local direction, disambiguated by the destination.
+            brg: float | None = None
+            if nxt and nxt != st:
+                pt = geo.subpath_point((st[2], st[1]), (nxt[2], nxt[1]), 0.02)
+                if pt:
+                    brg = pt[2]
+            if brg is None:
+                brg = geo.along_bearing(
+                    (st[2], st[1]), (dest[2], dest[1]) if dest else None
+                )
+            return st[1], st[2], brg if brg is not None else 0.0, 0.0
 
     if nxt:
-        return nxt[1], nxt[2], 0.0, 0.0
+        brg = geo.along_bearing((nxt[2], nxt[1]), (dest[2], dest[1]) if dest else None)
+        return nxt[1], nxt[2], brg if brg is not None else 0.0, 0.0
     return None
 
 
@@ -187,8 +236,13 @@ class TubeNetwork:
         async with self._lock:
             if time.time() - self._geo_ts > GEOMETRY_TTL:
                 await self._fetch_geometry()
-            if time.time() - self._status_ts > STATUS_TTL:
-                await self._fetch_status()
+            refresh_status = time.time() - self._status_ts > STATUS_TTL
+            if refresh_status:
+                # Claim the refresh inside the lock, fetch outside it — status
+                # is cosmetic and shouldn't block other callers for a second.
+                self._status_ts = time.time()
+        if refresh_status:
+            await self._fetch_status()
         return self._lines
 
     async def _fetch_geometry(self) -> None:
@@ -242,7 +296,6 @@ class TubeNetwork:
                     if statuses:
                         geo.status = statuses[0].get("statusSeverityDescription") or "Good Service"
                         geo.severity = statuses[0].get("statusSeverity", 10)
-            self._status_ts = time.time()
         except httpx.HTTPError as exc:
             log.warning("tube status fetch failed: %s", exc)
 

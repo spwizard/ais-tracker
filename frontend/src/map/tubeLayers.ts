@@ -12,6 +12,7 @@
  *      gliding along the strands via dead reckoning between polls.
  */
 import { IconLayer, PathLayer, ScatterplotLayer, TextLayer } from "@deck.gl/layers";
+import { PathStyleExtension } from "@deck.gl/extensions";
 import type { TubeLine, TubeStation, TubeTrain } from "@/types";
 import { deadReckon, DR_SCRATCH } from "./layers";
 import { getTrainIconAtlas, TRAIN_ICON_MAPPING } from "./trainIcons";
@@ -37,6 +38,19 @@ const LINE_COLORS: Record<string, { core: RGB; glow: RGB }> = {
   "waterloo-city": { core: [149, 205, 186], glow: [180, 230, 210] },
 };
 const FALLBACK = { core: [148, 163, 184] as RGB, glow: [190, 200, 210] as RGB };
+
+// Several lines share the same physical tracks (Circle rides District's south
+// side and the Met/H&C corridor up north), so without an offset the lower line
+// is simply invisible. Fan shared corridors apart with a small perpendicular
+// offset per line — a uniform few-pixel shift is imperceptible where a line
+// runs alone, and separates every shared corridor where it doesn't.
+// Values are in multiples of the CORE path width (~2.6px each step).
+const LINE_OFFSET: Record<string, number> = {
+  circle: 1.3,
+  "hammersmith-city": -1.3,
+  metropolitan: 2.6,
+  piccadilly: 1.3, // shares the District corridor out west
+};
 
 export function tubeColor(lineId: string): RGB {
   return (LINE_COLORS[lineId] ?? FALLBACK).core;
@@ -77,7 +91,9 @@ export function buildTubeLayers(opts: TubeLayerOptions) {
     }
   }
 
-  // 1a. Underglow — wide, soft, additive-feeling on the dark map.
+  // 1a. Underglow — wide, soft, additive-feeling on the dark map. The offset
+  // accessor is relative to each layer's own width, so the glow's offset is
+  // scaled down to land on the same pixels as the core's.
   layers.push(
     new PathLayer<LinePath>({
       id: "tube-glow",
@@ -92,6 +108,9 @@ export function buildTubeLayers(opts: TubeLayerOptions) {
       widthMinPixels: 6,
       capRounded: true,
       jointRounded: true,
+      extensions: [new PathStyleExtension({ offset: true })],
+      // PathStyleExtension injects getOffset at runtime; TS can't see it.
+      ...({ getOffset: (d: LinePath) => ((LINE_OFFSET[d.lineId] ?? 0) * 2.6) / 9 } as object),
     }),
     // 1b. Core — crisp official colour; disrupted lines fade.
     new PathLayer<LinePath>({
@@ -108,6 +127,8 @@ export function buildTubeLayers(opts: TubeLayerOptions) {
       widthMinPixels: 1.6,
       capRounded: true,
       jointRounded: true,
+      extensions: [new PathStyleExtension({ offset: true })],
+      ...({ getOffset: (d: LinePath) => LINE_OFFSET[d.lineId] ?? 0 } as object),
     }),
   );
 
@@ -156,53 +177,58 @@ export function buildTubeLayers(opts: TubeLayerOptions) {
         d.lat as number, d.lon as number, d.bearing, d.speed_kn,
         currentTime - d.ts, DR_SCRATCH,
       );
+    // Always the wedge-nosed train glyph, never a dot — stations are round
+    // (white roundels), so keeping trains elongated and bearing-rotated makes
+    // the two unmistakable at any zoom.
+    const glyphSize = zoom >= TRAIN_ICON_ZOOM ? 20 : 17;
     layers.push(
       new ScatterplotLayer<TubeTrain>({
         id: "tube-train-halo",
         data: trains,
         getPosition: pos,
-        getRadius: 8,
+        getRadius: 9,
         radiusUnits: "pixels",
         getFillColor: (d) => {
           const c = tubeColor(d.line);
-          return [c[0], c[1], c[2], 55];
+          return [c[0], c[1], c[2], 95];
         },
         updateTriggers: { getPosition: currentTime },
       }),
-      zoom >= TRAIN_ICON_ZOOM
-        ? new IconLayer<TubeTrain>({
-            id: "tube-trains",
-            data: trains,
-            pickable: true,
-            iconAtlas: getTrainIconAtlas(),
-            iconMapping: TRAIN_ICON_MAPPING,
-            getIcon: () => "train",
-            getPosition: pos,
-            getAngle: (d) => -(d.bearing ?? 0),
-            getColor: (d) => tubeColor(d.line),
-            getSize: 18,
-            sizeUnits: "pixels",
-            onClick: (info) => onClickTrain((info.object as TubeTrain) ?? null),
-            updateTriggers: { getPosition: currentTime },
-          })
-        : new ScatterplotLayer<TubeTrain>({
-            id: "tube-trains",
-            data: trains,
-            pickable: true,
-            getPosition: pos,
-            getRadius: 4,
-            radiusUnits: "pixels",
-            radiusMinPixels: 3,
-            getFillColor: (d) => {
-              const c = tubeColor(d.line);
-              return [c[0], c[1], c[2], 255];
-            },
-            stroked: true,
-            getLineColor: [255, 255, 255, 220],
-            lineWidthMinPixels: 1.2,
-            onClick: (info) => onClickTrain((info.object as TubeTrain) ?? null),
-            updateTriggers: { getPosition: currentTime },
-          }),
+      // White rim: the same glyph, slightly larger, underneath — the line
+      // colours camouflage against their own glowing strands when zoomed out,
+      // and the rim cuts each train free of the line it rides on.
+      new IconLayer<TubeTrain>({
+        id: "tube-train-rims",
+        data: trains,
+        iconAtlas: getTrainIconAtlas(),
+        iconMapping: TRAIN_ICON_MAPPING,
+        getIcon: () => "train",
+        getPosition: pos,
+        getAngle: (d) => -(d.bearing ?? 0),
+        getColor: [255, 255, 255, 235],
+        getSize: glyphSize + 5,
+        sizeUnits: "pixels",
+        sizeMinPixels: 18,
+        sizeMaxPixels: 30,
+        updateTriggers: { getPosition: currentTime, getSize: glyphSize },
+      }),
+      new IconLayer<TubeTrain>({
+        id: "tube-trains",
+        data: trains,
+        pickable: true,
+        iconAtlas: getTrainIconAtlas(),
+        iconMapping: TRAIN_ICON_MAPPING,
+        getIcon: () => "train",
+        getPosition: pos,
+        getAngle: (d) => -(d.bearing ?? 0),
+        getColor: (d) => tubeColor(d.line),
+        getSize: glyphSize,
+        sizeUnits: "pixels",
+        sizeMinPixels: 14,
+        sizeMaxPixels: 25,
+        onClick: (info) => onClickTrain((info.object as TubeTrain) ?? null),
+        updateTriggers: { getPosition: currentTime, getSize: glyphSize },
+      }),
     );
   }
 

@@ -536,8 +536,13 @@ async def feature_flags():
     flags["bus"] = bool(app.state.settings.enable_bus and app.state.settings.bods_api_key)
     # London traffic cameras available when the TfL feed is enabled server-side.
     flags["cameras"] = bool(app.state.settings.enable_cameras)
-    # GB trains (Tier-1 prototype): sim feed or Darwin credentials.
-    flags["train"] = bool(app.state.settings.enable_train)
+    # GB trains: hidden until the real feed exists — the layer only surfaces
+    # once Darwin Push Port credentials are configured (the simulator stays a
+    # dev-only tool via ENABLE_TRAIN + TRAIN_SIM, without the UI toggle).
+    s2 = app.state.settings
+    flags["train"] = bool(
+        s2.enable_train and s2.darwin_host and s2.darwin_user and s2.darwin_pass
+    )
     # London Underground layer (TfL, keyless).
     flags["tube"] = bool(app.state.settings.enable_tube)
     return {"flags": flags}

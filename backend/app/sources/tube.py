@@ -63,15 +63,16 @@ class TubeSource(Source):
                 for key, p in best.items():
                     lid = p["lineId"]
                     geo = lines[lid]
+                    towards = p.get("towards") or p.get("destinationName") or ""
                     fix = infer_position(
                         geo,
                         p.get("currentLocation"),
                         p.get("stationName") or "",
                         float(p.get("timeToStation") or 0),
+                        towards=towards,
                     )
                     if fix is None:
                         continue
-                    towards = p.get("towards") or p.get("destinationName") or ""
                     self.messages_seen += 1
                     self.last_msg_ts = now
                     await self._store.upsert(TubeTrain(

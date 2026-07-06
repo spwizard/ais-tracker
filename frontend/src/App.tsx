@@ -82,6 +82,7 @@ export default function App() {
   const sources = useSources();
 
   const [filters, setFilters] = useState<Filters>(defaultFilters);
+  const [showVessels, setShowVessels] = useState(true); // the whole sea picture
   const [showTrails, setShowTrails] = useState(false); // off until the user enables it
   const [densityMode, setDensityMode] = useState(false);
   const [showWind, setShowWind] = useState(false);
@@ -821,7 +822,7 @@ export default function App() {
     <div className="relative h-full w-full overflow-hidden bg-background">
       <MapView
         ref={mapRef}
-        vessels={filtered}
+        vessels={showVessels ? filtered : []}
         version={version}
         showTrails={showTrails}
         trailWindowSec={TRAIL_WINDOW_SEC}
@@ -976,6 +977,8 @@ export default function App() {
         {panels.layers.open && (
           <LayerControls
             chrome={chromeFor("layers")}
+            showVessels={showVessels}
+            onToggleVessels={setShowVessels}
             showTrails={showTrails}
             onToggleTrails={setShowTrails}
             densityMode={densityMode}
