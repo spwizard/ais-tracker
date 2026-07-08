@@ -144,6 +144,29 @@ class TubeTrain(BaseModel):
     ts: float = 0.0  # last update (epoch seconds)
 
 
+class Incident(BaseModel):
+    """A located, timestamped thing-happening — the unifying entity of the
+    Argus incident spine. Every eye (official feeds, inference, news/social)
+    produces Incidents of the same shape, so they all flow into the same alert
+    rail / eyes-on-alert / analyst / map machinery.
+    """
+
+    id: str  # source-prefixed stable key, e.g. "tfl-road:TIMS-229103"
+    source: str  # which eye produced it: "tfl-road", later "heli", "news"…
+    category: str  # collision | breakdown | hazard | works | delay | event | other
+    severity: str  # minor | moderate | serious (normalised)
+    confidence: str  # official | inferred | reported
+    title: str
+    detail: Optional[str] = None
+    location: Optional[str] = None
+    lat: float
+    lon: float
+    url: Optional[str] = None
+
+    ts: float = 0.0  # first seen / start (epoch seconds)
+    updated: float = 0.0  # last update
+
+
 class TrainStop(BaseModel):
     """One calling point on a train's route (detail panel + route line)."""
 

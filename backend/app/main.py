@@ -58,11 +58,13 @@ from .sources import AdsbLolSource, BodsSource, create_sources
 from .sources.darwin import DarwinSource
 from .sources.rail_sim import SimRailSource
 from .sources.tube import TubeSource
+from .sources.tfl_road import TflRoadSource
 from .store import create_store
 from .store.aircraft import AircraftStore
 from .store.bus import BusStore
 from .store.train import TrainStore
 from .store.tube import TubeStore
+from .store.incident import IncidentStore
 from .ws.broadcaster import Broadcaster
 
 logging.basicConfig(
@@ -225,6 +227,9 @@ async def lifespan(app: FastAPI):
     tube_store = TubeStore() if settings.enable_tube else None
     app.state.tube_store = tube_store
     app.state.tube_network = TubeNetwork(settings.tfl_app_key) if settings.enable_tube else None
+    # Incident spine (Argus): TfL road disruptions now, more eyes later.
+    incident_store = IncidentStore() if settings.enable_incidents else None
+    app.state.incident_store = incident_store
     # Aircraft enrichment (registration / operator / route / photo) via adsbdb.
     app.state.air_enricher = AircraftEnricher() if settings.enable_air else None
     # Land domain: London traffic cameras (TfL JamCams), lazily fetched + cached.
@@ -243,7 +248,7 @@ async def lifespan(app: FastAPI):
     broadcaster = Broadcaster(
         store, settings.broadcast_hz,
         air_store=air_store, bus_store=bus_store, train_store=train_store,
-        tube_store=tube_store,
+        tube_store=tube_store, incident_store=incident_store,
     )
     broadcaster.start()
     app.state.broadcaster = broadcaster
@@ -280,6 +285,9 @@ async def lifespan(app: FastAPI):
             sources.append(SimRailSource(train_store, settings))
     if tube_store is not None:
         sources.append(TubeSource(tube_store, app.state.tube_network, settings))
+    if incident_store is not None:
+        app.state.tfl_road = TflRoadSource(incident_store, settings)
+        sources.append(app.state.tfl_road)
     for src in sources:
         src.start()
     app.state.sources = sources
@@ -494,6 +502,7 @@ async def healthz():
         "buses": await app.state.bus_store.count() if app.state.bus_store else 0,
         "trains": await app.state.train_store.count() if app.state.train_store else 0,
         "tube": await app.state.tube_store.count() if app.state.tube_store else 0,
+        "incidents": await app.state.incident_store.count() if app.state.incident_store else 0,
         "clients": app.state.broadcaster.client_count,
         "registry": app.state.registry.count() if app.state.registry else 0,
         "data": {
@@ -503,6 +512,14 @@ async def healthz():
             "briefing_ready": bool(settings.anthropic_api_key),
         },
     }
+
+
+@app.get("/api/incidents")
+async def incidents():
+    """All current incidents (the Argus spine)."""
+    if app.state.incident_store is None:
+        return {"incidents": []}
+    return {"incidents": [i.model_dump() for i in await app.state.incident_store.snapshot()]}
 
 
 @app.get("/api/rail/network")
@@ -683,6 +700,8 @@ async def feature_flags():
     )
     # London Underground layer (TfL, keyless).
     flags["tube"] = bool(app.state.settings.enable_tube)
+    # Incident spine (Argus).
+    flags["incidents"] = bool(app.state.settings.enable_incidents)
     return {"flags": flags}
 
 

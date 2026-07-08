@@ -24,6 +24,7 @@ import type {
   TubeLine,
   TubeStation,
   TubeTrain,
+  Incident,
   Camera,
   DensityPoint,
   WeatherMeta,
@@ -38,6 +39,7 @@ import { buildBusLayers } from "./busLayers";
 import { buildTrainLayers } from "./trainLayers";
 import { buildTubeLayers, tubeColor } from "./tubeLayers";
 import { buildHotspotLayers } from "./hotspotLayers";
+import { buildIncidentLayers } from "./incidentLayers";
 import type { HeatPoint, Hotspot } from "@/hooks/useDelayHotspots";
 import { ScatterplotLayer, TextLayer } from "@deck.gl/layers";
 import { buildReplayLayers, type TrailMode, type ColorMode } from "./replayLayers";
@@ -162,6 +164,9 @@ interface MapViewProps {
   tubeNetwork: { lines: TubeLine[]; stations: TubeStation[] };
   tubeTrains: TubeTrain[];
   showTube: boolean;
+  incidents: Incident[];
+  showIncidents: boolean;
+  onSelectIncident: (i: Incident | null) => void;
   // The camera the selected bus is heading toward next — pulse a ring on it.
   nextCameraPos: [number, number] | null;
 }
@@ -247,6 +252,9 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
     tubeNetwork,
     tubeTrains,
     showTube,
+    incidents,
+    showIncidents,
+    onSelectIncident,
     nextCameraPos,
   } = props;
 
@@ -571,6 +579,15 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
             onClickTrain: () => void 0,
           })
         : []),
+      // Incidents (Argus spine) — located things-happening, on top of the map.
+      ...(showIncidents
+        ? buildIncidentLayers({
+            incidents,
+            currentTime,
+            zoom,
+            onClick: onSelectIncident,
+          })
+        : []),
       // Pulsing ring on the camera the selected bus is heading toward next.
       ...(nextCameraPos ? buildNextCameraRing(nextCameraPos, currentTime) : []),
     ],
@@ -613,6 +630,9 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
       tubeNetwork,
       tubeTrains,
       showTube,
+      incidents,
+      showIncidents,
+      onSelectIncident,
       nextCameraPos,
       densityMode,
       drawing,
@@ -698,6 +718,9 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
             ? buildAircraftTooltip(object as TrackedAircraft)
             : object && (object as Camera).image
               ? buildCameraTooltip(object as Camera)
+              : object && (object as Incident).severity !== undefined &&
+                  (object as Incident).category !== undefined
+                ? buildIncidentTooltip(object as Incident)
               : object && (object as TubeTrain).line_name !== undefined
                 ? buildTubeTrainTooltip(object as TubeTrain)
               : object && (object as { lineId?: string; status?: string }).lineId !== undefined &&
@@ -926,6 +949,18 @@ function buildNextCameraRing(pos: [number, number], t: number) {
       getAlignmentBaseline: "bottom",
     }),
   ];
+}
+
+function buildIncidentTooltip(i: Incident) {
+  const c = i.severity === "serious" ? "#f43f5e" : i.severity === "moderate" ? "#fb923c" : "#facc15";
+  return {
+    html: `
+      <div style="font-family:Inter,system-ui,sans-serif;min-width:170px;max-width:240px">
+        <div style="font-weight:600;margin-bottom:2px">${escapeHtml(i.title)}</div>
+        <div style="opacity:.75;font-size:11px;text-transform:capitalize"><span style="color:${c}">${escapeHtml(i.severity)} ${escapeHtml(i.category)}</span> · click for detail</div>
+      </div>`,
+    style: tooltipStyle(),
+  };
 }
 
 function buildTubeTrainTooltip(t: TubeTrain) {

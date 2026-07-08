@@ -85,6 +85,9 @@ class Settings(BaseSettings):
     darwin_snapshot_url: str = Field(default="", alias="DARWIN_SNAPSHOT_URL")
     darwin_apikey: str = Field(default="", alias="DARWIN_APIKEY")
 
+    # --- Incidents: Argus spine (TfL road disruptions + future eyes) --------
+    enable_incidents: bool = Field(default=True, alias="ENABLE_INCIDENTS")
+
     # --- Land: London Underground (TfL — free, keyless; app_key raises limits) --
     enable_tube: bool = Field(default=True, alias="ENABLE_TUBE")
 

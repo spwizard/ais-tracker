@@ -18,8 +18,8 @@ import {
   TrainFront,
   TramFront,
   Activity,
-  ChevronRight,
   Landmark,
+  TriangleAlert,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
@@ -55,6 +55,9 @@ interface LayerControlsProps {
   showHotspots?: boolean;
   onToggleHotspots?: () => void;
   onOpenLondon?: () => void;
+  showIncidents?: boolean;
+  onToggleIncidents?: (v: boolean) => void;
+  incidentsAvailable?: boolean;
   busAvailable: boolean;
   trainAvailable: boolean;
   tubeAvailable: boolean;
@@ -171,6 +174,9 @@ export function LayerControls({
   showHotspots,
   onToggleHotspots,
   onOpenLondon,
+  showIncidents,
+  onToggleIncidents,
+  incidentsAvailable,
   busAvailable,
   trainAvailable,
   tubeAvailable,
@@ -238,6 +244,15 @@ export function LayerControls({
 
         {(busAvailable || camerasAvailable || trainAvailable || tubeAvailable) && (
           <Section title="Land">
+            {incidentsAvailable && onToggleIncidents && (
+              <Row
+                icon={TriangleAlert}
+                label="Incidents"
+                hint="Live located incidents — road collisions, hazards, closures. Click one to see detail and turn nearby cameras on it."
+                checked={!!showIncidents}
+                onChange={onToggleIncidents}
+              />
+            )}
             {busAvailable && (
               <Row
                 icon={Bus}
@@ -273,16 +288,15 @@ export function LayerControls({
               >
                 <Activity className="h-3.5 w-3.5 text-primary/80" />
                 State of the Railway
-                <ChevronRight className="h-3.5 w-3.5 opacity-40" />
               </button>
             )}
             {onOpenLondon && (tubeAvailable || busAvailable || trainAvailable) && (
               <button
                 onClick={onOpenLondon}
-                className="mt-0.5 flex w-full items-center gap-2 rounded-md border border-border/60 px-2.5 py-1.5 text-xs text-foreground/80 transition-colors hover:border-primary/40 hover:bg-primary/10"
+                className="ml-6 flex items-center gap-2 rounded-md px-2 py-1 text-xs text-foreground/75 transition-colors hover:bg-foreground/5 hover:text-foreground"
               >
                 <Landmark className="h-3.5 w-3.5 text-primary/80" />
-                London transport pulse
+                London transport
               </button>
             )}
             {trainAvailable && showTrain && onToggleHotspots && (

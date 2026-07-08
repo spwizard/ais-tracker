@@ -12,6 +12,7 @@ import type {
   TrackedVessel,
   Train,
   TubeTrain,
+  Incident,
   Vessel,
 } from "@/types";
 import type { Geofence } from "@/geofence/types";
@@ -50,6 +51,8 @@ export function useVesselsSocket() {
   const trainsRef = useRef<Map<string, TrackedTrain>>(new Map());
   // Live Underground trains (TfL inference), keyed by line:vehicleId.
   const tubeRef = useRef<Map<string, TubeTrain>>(new Map());
+  // Live incidents (Argus spine), keyed by id.
+  const incidentsRef = useRef<Map<string, Incident>>(new Map());
   const [version, setVersion] = useState(0);
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
   const [events, setEvents] = useState<GeofenceEvent[]>([]);
@@ -160,6 +163,13 @@ export function useVesselsSocket() {
     Object.assign(prev, t);
   }, []);
 
+  const applyIncident = useCallback((i: Incident) => {
+    const map = incidentsRef.current;
+    const prev = map.get(i.id);
+    if (!prev) { map.set(i.id, i); return; }
+    Object.assign(prev, i);
+  }, []);
+
   // Client-side backstop eviction. Entities normally leave via the backend's
   // `removed` lists; if one is ever missed it would otherwise live (trail and
   // all) for the whole session. TTLs sit well above the backend's own.
@@ -245,6 +255,12 @@ export function useVesselsSocket() {
         } else if (frame.type === "tube_update") {
           for (const t of frame.trains) applyTube(t);
           for (const id of frame.removed) tubeRef.current.delete(id);
+        } else if (frame.type === "incident_snapshot") {
+          incidentsRef.current.clear();
+          for (const i of frame.incidents) applyIncident(i);
+        } else if (frame.type === "incident_update") {
+          for (const i of frame.incidents) applyIncident(i);
+          for (const id of frame.removed) incidentsRef.current.delete(id);
         } else if (frame.type === "geofence_event") {
           setEvents((prev) => [frame, ...prev].slice(0, MAX_EVENTS));
           return; // not a vessel update — no render bump needed
@@ -332,7 +348,7 @@ export function useVesselsSocket() {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       ws?.close();
     };
-  }, [applyVessel, applyAircraft, applyBus, applyTrain, applyTube, scheduleRender]);
+  }, [applyVessel, applyAircraft, applyBus, applyTrain, applyTube, applyIncident, scheduleRender]);
 
   return {
     vesselsRef,
@@ -340,6 +356,7 @@ export function useVesselsSocket() {
     busesRef,
     trainsRef,
     tubeRef,
+    incidentsRef,
     version,
     status,
     events,

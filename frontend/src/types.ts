@@ -362,6 +362,23 @@ export interface RailBoard {
   services: BoardService[];
 }
 
+/** A located incident — the Argus spine's unifying entity. */
+export interface Incident {
+  id: string;
+  source: string; // "tfl-road", …
+  category: "collision" | "breakdown" | "hazard" | "works" | "delay" | "event" | "other";
+  severity: "minor" | "moderate" | "serious";
+  confidence: "official" | "inferred" | "reported";
+  title: string;
+  detail: string | null;
+  location: string | null;
+  lat: number;
+  lon: number;
+  url: string | null;
+  ts: number;
+  updated: number;
+}
+
 /** A GB railway station (for the rail layer's station markers). */
 export interface RailStation {
   crs: string;
@@ -479,6 +496,8 @@ export type ServerFrame =
   | { type: "train_update"; trains: Train[]; removed: string[] }
   | { type: "tube_snapshot"; trains: TubeTrain[] }
   | { type: "tube_update"; trains: TubeTrain[]; removed: string[] }
+  | { type: "incident_snapshot"; incidents: Incident[] }
+  | { type: "incident_update"; incidents: Incident[]; removed: string[] }
   | GeofenceEvent
   | RiskEvent
   | { type: "flagged"; mmsis: number[] }

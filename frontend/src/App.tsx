@@ -30,10 +30,11 @@ import { useRailPulse } from "@/hooks/useRailPulse";
 import { useDelayHotspots, type Hotspot } from "@/hooks/useDelayHotspots";
 import { useLondonPulse } from "@/hooks/useLondonPulse";
 import { LondonPulse } from "@/panels/LondonPulse";
+import { IncidentCard } from "@/panels/IncidentCard";
 import { useTubeNetwork } from "@/hooks/useTubeNetwork";
 import { useCameraWall } from "@/hooks/useCameraWall";
 import { nearbyCameras, nextCameraAhead } from "@/lib/nearbyCameras";
-import type { Camera, TrackedBus, TrackedTrain, TubeTrain } from "@/types";
+import type { Camera, TrackedBus, TrackedTrain, TubeTrain, Incident } from "@/types";
 import { MapControls } from "@/panels/MapControls";
 import { ZonesPanel } from "@/panels/ZonesPanel";
 import { DrawToolbar } from "@/panels/DrawToolbar";
@@ -82,7 +83,7 @@ const SEARCH_API = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 const SEARCH_TRACK_COLOR: [number, number, number] = [180, 210, 255];
 
 export default function App() {
-  const { vesselsRef, aircraftRef, busesRef, trainsRef, tubeRef, version, status, events, riskEvents, flagged, geofenceSync, setTrailGate } =
+  const { vesselsRef, aircraftRef, busesRef, trainsRef, tubeRef, incidentsRef, version, status, events, riskEvents, flagged, geofenceSync, setTrailGate } =
     useVesselsSocket();
   const { panels, setOpen, toggle, togglePin, move, focus, zIndexOf, autoPlace } =
     usePanels();
@@ -120,6 +121,9 @@ export default function App() {
   const londonPulse = useLondonPulse(panels.londonpulse.open);
   const [showTube, setShowTube] = useState(false); // London Underground layer
   const tubeAvailable = useFlag("tube");
+  const [showIncidents, setShowIncidents] = useState(false);
+  const incidentsAvailable = useFlag("incidents");
+  const [selectedIncidentId, setSelectedIncidentId] = useState<string | null>(null);
   const tubeNetwork = useTubeNetwork(showTube);
   const [selectedBusId, setSelectedBusId] = useState<string | null>(null);
   const [followBusId, setFollowBusId] = useState<string | null>(null);
@@ -378,6 +382,17 @@ export default function App() {
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [version, tubeRef, showTube]);
+
+  const incidents = useMemo<Incident[]>(() => {
+    if (!showIncidents) return [];
+    return Array.from(incidentsRef.current.values());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [version, incidentsRef, showIncidents]);
+  const selectedIncident = useMemo(
+    () => (selectedIncidentId ? incidentsRef.current.get(selectedIncidentId) ?? null : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selectedIncidentId, version, incidentsRef],
+  );
 
   const selectedTrain = useMemo(
     () => (selectedTrainId ? trainsRef.current.get(selectedTrainId) ?? null : null),
@@ -760,6 +775,27 @@ export default function App() {
     focus("station");
   };
 
+  // The London-only layers are invisible from the Channel/Norway — enabling
+  // one flies the map to London unless you're already looking at it.
+  const flyToLondonIfAway = useCallback(() => {
+    const b = mapRef.current?.getBounds();
+    const inLondon =
+      b != null &&
+      (b[0] + b[2]) / 2 > -0.65 &&
+      (b[0] + b[2]) / 2 < 0.4 &&
+      (b[1] + b[3]) / 2 > 51.2 &&
+      (b[1] + b[3]) / 2 < 51.8;
+    if (!inLondon)
+      mapRef.current?.flyTo({ longitude: -0.11, latitude: 51.5, zoom: 11 });
+  }, []);
+  const toggleLondonLayer = useCallback(
+    (set: (v: boolean) => void) => (v: boolean) => {
+      set(v);
+      if (v) flyToLondonIfAway();
+    },
+    [flyToLondonIfAway],
+  );
+
   // Camera selection → the live camera view panel.
   const selectCamera = (c: Camera | null) => {
     setSelectedCameraId(c?.id ?? null);
@@ -938,6 +974,9 @@ export default function App() {
         tubeNetwork={tubeNetwork}
         tubeTrains={tubeTrains}
         showTube={showTube}
+        incidents={incidents}
+        showIncidents={showIncidents}
+        onSelectIncident={(i: Incident | null) => setSelectedIncidentId(i?.id ?? null)}
         onSelectTrain={selectTrain}
         selectedTrainId={selectedTrainId}
         onSelectStation={selectStation}
@@ -1046,13 +1085,16 @@ export default function App() {
             onToggleAir={setShowAir}
             airAvailable={airAvailable}
             showBus={showBus}
-            onToggleBus={setShowBus}
+            onToggleBus={toggleLondonLayer(setShowBus)}
             showTrain={showTrain}
             onToggleTrain={setShowTrain}
             trainAvailable={trainAvailable}
             showTube={showTube}
-            onToggleTube={setShowTube}
+            onToggleTube={toggleLondonLayer(setShowTube)}
             tubeAvailable={tubeAvailable}
+            showIncidents={showIncidents}
+            onToggleIncidents={toggleLondonLayer(setShowIncidents)}
+            incidentsAvailable={incidentsAvailable}
             onOpenRailPulse={() => {
               if (panels.railpulse.open) setOpen("railpulse", false);
               else { setOpen("railpulse", true); autoPlace("railpulse"); focus("railpulse"); }
@@ -1065,7 +1107,7 @@ export default function App() {
             }}
             busAvailable={busAvailable}
             showCameras={showCameras}
-            onToggleCameras={setShowCameras}
+            onToggleCameras={toggleLondonLayer(setShowCameras)}
             camerasAvailable={camerasAvailable}
             onOpenWall={() => wall.setOpen(true)}
             wallCount={wall.ids.length}
@@ -1291,6 +1333,17 @@ export default function App() {
           }}
         />
 
+        {selectedIncident && (
+          <IncidentCard
+            incident={selectedIncident}
+            hasEyes={alertHasEyes({ lat: selectedIncident.lat, lon: selectedIncident.lon } as ToastAlert)}
+            onEyes={() => {
+              alertEyes({ title: selectedIncident.title, lat: selectedIncident.lat, lon: selectedIncident.lon } as ToastAlert);
+              setSelectedIncidentId(null);
+            }}
+            onClose={() => setSelectedIncidentId(null)}
+          />
+        )}
         <AlertToasts
           alerts={toastAlerts}
           onClick={onEventClick}
