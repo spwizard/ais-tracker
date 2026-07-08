@@ -175,6 +175,59 @@ CAMERA_TOOLS: list[dict] = [
     },
 ]
 
+# Rail-domain tools — offered when the live Darwin feed is wired in.
+RAIL_TOOLS: list[dict] = [
+    {
+        "name": "query_trains",
+        "description": (
+            "Search live GB rail services (national Darwin feed). Filters "
+            "combine with AND. `to`/`from` match origin/destination names. "
+            "Returns total matches plus up to `limit` services with their "
+            "current position, next calling point and lateness."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "to": {"type": "string", "description": "Destination contains, e.g. 'Manchester'"},
+                "from": {"type": "string", "description": "Origin contains"},
+                "min_delay_min": {"type": "number", "description": "Only services at least this late"},
+                "sort": {"type": "string", "enum": ["delay_desc", "delay_asc"]},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 25},
+            },
+        },
+    },
+    {
+        "name": "train_dossier",
+        "description": (
+            "One service in full: origin, destination, lateness, current "
+            "inferred position and the complete calling pattern with predicted "
+            "times. Use the `id` from query_trains or station_board."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"id": {"type": "string"}},
+            "required": ["id"],
+        },
+    },
+    {
+        "name": "station_board",
+        "description": (
+            "A live departure/arrival board for any GB station, built from the "
+            "live feed: the next services calling there with predicted times, "
+            "where they started and where they're going, and lateness. "
+            "Match by station name or 3-letter CRS code."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "station": {"type": "string", "description": "Name or CRS, e.g. 'Reading' or 'RDG'"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 20},
+            },
+            "required": ["station"],
+        },
+    },
+]
+
 SYSTEM_PROMPT = """\
 You are the on-duty maritime intelligence analyst inside a live vessel-tracking \
 application. The user is looking at a map of live AIS traffic; you have tools \
@@ -185,6 +238,15 @@ COVERAGE — the app currently tracks the UK / English Channel (AISStream), the 
 Baltic and Finnish waters (Digitraffic), and the Norwegian coast (Kystverket). \
 Only vessels currently transmitting inside that coverage are visible. If asked \
 about somewhere else, say it's outside coverage.
+
+THE RAILWAY — when rail tools are available you also watch every live GB
+train (the national Darwin feed): query_trains to search, station_board for
+live departures at any station, train_dossier for one service's full calling
+pattern. Positions are inferred between calling points (indicative). Services
+have no public headcode in this feed — refer to them as "the HH:MM Origin to
+Destination" using their first calling-point time. Times are UK local. After
+rail answers, call show_on_map with the service's lat/lon to point the map at
+it when the user asks about a specific train or area.
 
 EYES ON LAND — when camera tools are available you can literally look at London \
 road traffic: find_cameras locates TfL junction cameras, view_camera runs vision \
@@ -287,6 +349,7 @@ class AnalystService:
         flagged: Callable[[], Awaitable[set[int]]],
         cameras: Callable[[], Awaitable[list[dict]]] | None = None,
         camera_view: Callable[[str], Awaitable[dict]] | None = None,
+        trains: Callable[[], Awaitable[list]] | None = None,
     ) -> None:
         self._model = model
         self._api_key = api_key or None
@@ -301,13 +364,17 @@ class AnalystService:
         self._flagged = flagged
         self._cameras = cameras
         self._camera_view = camera_view
+        self._trains = trains
 
     def _tools(self) -> list[dict]:
         """The tool set for this deployment — camera tools only when the land
         camera feed is wired in."""
+        tools = list(TOOLS)
         if self._cameras and self._camera_view:
-            return TOOLS + CAMERA_TOOLS
-        return TOOLS
+            tools += CAMERA_TOOLS
+        if self._trains is not None:
+            tools += RAIL_TOOLS
+        return tools
 
     def _ensure_client(self) -> anthropic.AsyncAnthropic:
         if self._client is None:
@@ -434,6 +501,72 @@ class AnalystService:
             ],
         }
 
+    @staticmethod
+    def _train_row(t) -> dict:
+        first = t.stops[0] if t.stops else None
+        dep = (
+            datetime.datetime.fromtimestamp(first.t).strftime("%H:%M") if first else "?"
+        )
+        return _compact({
+            "id": t.id,
+            "service": f"{dep} {t.origin} to {t.destination}",
+            "next": t.next_name,
+            "delay_min": round(t.delay_min or 0),
+            "lat": _round(t.lat), "lon": _round(t.lon),
+        })
+
+    async def _query_trains(self, p: dict) -> dict:
+        trains = await self._trains()  # type: ignore[misc]
+        to = (p.get("to") or "").lower()
+        frm = (p.get("from") or "").lower()
+        min_delay = float(p.get("min_delay_min") or 0)
+        out = [
+            t for t in trains
+            if (not to or to in (t.destination or "").lower())
+            and (not frm or frm in (t.origin or "").lower())
+            and (t.delay_min or 0) >= min_delay
+        ]
+        reverse = p.get("sort") != "delay_asc"
+        out.sort(key=lambda t: t.delay_min or 0, reverse=reverse)
+        limit = max(1, min(int(p.get("limit") or 10), 25))
+        return {"total_matching": len(out), "trains": [self._train_row(t) for t in out[:limit]]}
+
+    async def _train_dossier(self, p: dict) -> dict:
+        trains = await self._trains()  # type: ignore[misc]
+        t = next((x for x in trains if x.id == str(p.get("id"))), None)
+        if t is None:
+            return {"error": "unknown or no-longer-live service id"}
+        row = self._train_row(t)
+        row["speed_kn"] = t.speed_kn
+        row["calling_points"] = [
+            {"station": s0.name,
+             "time": datetime.datetime.fromtimestamp(s0.t).strftime("%H:%M")}
+            for s0 in t.stops
+        ]
+        return {"train": row}
+
+    async def _station_board(self, p: dict) -> dict:
+        from .rail.board import build_board
+
+        trains = await self._trains()  # type: ignore[misc]
+        board = build_board(trains, p.get("station") or "", int(p.get("limit") or 10))
+        if board.get("error"):
+            return board
+        return {
+            "station_matched": board.get("station"),
+            "total_upcoming": board.get("total_upcoming"),
+            "services": [
+                _compact({
+                    "time": datetime.datetime.fromtimestamp(sv["t"]).strftime("%H:%M"),
+                    "id": sv["id"],
+                    "from": sv["from"],
+                    "to": sv["to"],
+                    "delay_min": sv["delay_min"],
+                })
+                for sv in board.get("services", [])
+            ],
+        }
+
     async def _run_tool(self, name: str, p: dict) -> Any:
         if name == "query_vessels":
             return await self._query_vessels(p)
@@ -443,6 +576,12 @@ class AnalystService:
             return await self._recent_events(p)
         if name == "weather_at":
             return await self._weather_at(p)
+        if name == "query_trains" and self._trains is not None:
+            return await self._query_trains(p)
+        if name == "train_dossier" and self._trains is not None:
+            return await self._train_dossier(p)
+        if name == "station_board" and self._trains is not None:
+            return await self._station_board(p)
         if name == "find_cameras" and self._cameras:
             return await self._find_cameras(p)
         if name == "view_camera" and self._camera_view:
@@ -467,6 +606,16 @@ class AnalystService:
             return f"Checked recent risk events · {n} found"
         if name == "weather_at":
             return "Checked sea conditions"
+        if name == "query_trains":
+            n = result.get("total_matching", "?") if isinstance(result, dict) else "?"
+            return f"Searched live trains · {n} match{'es' if n != 1 else ''}"
+        if name == "train_dossier":
+            tr = (result or {}).get("train", {}) if isinstance(result, dict) else {}
+            return f"Pulled service · {tr.get('service') or p.get('id')}"
+        if name == "station_board":
+            st = result.get("station_matched") if isinstance(result, dict) else None
+            n = result.get("total_upcoming", "?") if isinstance(result, dict) else "?"
+            return f"Departure board · {st or p.get('station')} · {n} services"
         if name == "find_cameras":
             n = result.get("total_matching", "?") if isinstance(result, dict) else "?"
             return f"Found {n} traffic camera{'s' if n != 1 else ''}"

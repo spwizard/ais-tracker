@@ -16,3 +16,5 @@ cfgrib>=0.9
 ecmwflibs>=0.6
 numpy>=1.26
 Pillow>=10.0
+aiokafka>=0.11
+certifi>=2024.0

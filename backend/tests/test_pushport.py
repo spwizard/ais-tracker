@@ -1,6 +1,7 @@
 """Push Port parsing against a representative v16 TS frame."""
 import gzip
-from datetime import datetime, timezone
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from app.rail.pushport import parse_pushport, maybe_gunzip
 
@@ -35,7 +36,7 @@ def test_parse_ts_frame():
     assert [l.tiploc for l in s.locations] == ["PADTON", "RDNGSTN", "BRSTLTM"]
     # PADTON dep was an actual; times resolve on the service date.
     assert s.locations[0].actual is True
-    base = datetime(2026, 7, 6, tzinfo=timezone.utc).timestamp()
+    base = datetime(2026, 7, 6, tzinfo=ZoneInfo("Europe/London")).timestamp()
     assert abs(s.locations[0].t - (base + 10 * 3600 + 2 * 60)) < 1
     # Monotonic through the journey.
     ts = [l.t for l in s.locations]
@@ -70,6 +71,6 @@ def test_departure_estimate_beats_actual_arrival_but_not_actual_departure():
     )
     s = parse_pushport(frame)[0]
     rdg = s.locations[1]
-    base = datetime(2026, 7, 6, tzinfo=timezone.utc).timestamp()
+    base = datetime(2026, 7, 6, tzinfo=ZoneInfo("Europe/London")).timestamp()
     assert rdg.actual is True  # the actual dep (10:29) survived the later estimate
     assert abs(rdg.t - (base + 10 * 3600 + 29 * 60)) < 1

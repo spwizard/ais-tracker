@@ -75,9 +75,15 @@ class Settings(BaseSettings):
     # set the DARWIN_* credentials once granted.
     enable_train: bool = Field(default=False, alias="ENABLE_TRAIN")
     train_sim: bool = Field(default=True, alias="TRAIN_SIM")
-    darwin_host: str = Field(default="", alias="DARWIN_HOST")
+    # Darwin Push Port via the Rail Data Marketplace (Confluent Kafka).
+    darwin_bootstrap: str = Field(default="", alias="DARWIN_BOOTSTRAP")
+    darwin_topic: str = Field(default="", alias="DARWIN_TOPIC")
+    darwin_group: str = Field(default="", alias="DARWIN_GROUP")
     darwin_user: str = Field(default="", alias="DARWIN_USER")
     darwin_pass: str = Field(default="", alias="DARWIN_PASS")
+    # Snapshot warm-start (REST product): full current state on boot.
+    darwin_snapshot_url: str = Field(default="", alias="DARWIN_SNAPSHOT_URL")
+    darwin_apikey: str = Field(default="", alias="DARWIN_APIKEY")
 
     # --- Land: London Underground (TfL — free, keyless; app_key raises limits) --
     enable_tube: bool = Field(default=True, alias="ENABLE_TUBE")

@@ -272,7 +272,7 @@ async def lifespan(app: FastAPI):
         sources.append(BodsSource(bus_store, settings))
     if train_store is not None:
         # Sim feed for the Tier-1 prototype; Darwin takes over once configured.
-        if settings.darwin_host and settings.darwin_user:
+        if settings.darwin_bootstrap and settings.darwin_user:
             sources.append(DarwinSource(train_store, settings))
         elif settings.train_sim:
             sources.append(SimRailSource(train_store, settings))
@@ -375,6 +375,7 @@ async def lifespan(app: FastAPI):
         flagged=app.state.risk_engine.flagged_set,
         cameras=app.state.cameras.list if app.state.cameras else None,
         camera_view=_analyst_camera_view if app.state.cameras else None,
+        trains=train_store.snapshot if train_store else None,
     )
     log.info("LLM provider: %s", settings.llm_provider)
 
@@ -502,6 +503,31 @@ async def healthz():
     }
 
 
+@app.get("/api/rail/network")
+async def rail_network():
+    """GB rail route geometry (Network Rail reference lines, OGL) — the map's
+    actual lines. Static file, gzipped by middleware, cached by the browser."""
+    from pathlib import Path
+
+    path = Path(__file__).parent / "rail" / "network.geojson"
+    if app.state.train_store is None or not path.is_file():
+        return Response(status_code=204)
+    return FileResponse(
+        path, media_type="application/geo+json",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
+@app.get("/api/rail/board")
+async def rail_board(station: str, limit: int = 12):
+    """Live departure board for a station (name or CRS) from the train picture."""
+    if app.state.train_store is None:
+        return {"services": []}
+    from .rail.board import build_board
+
+    return build_board(await app.state.train_store.snapshot(), station, limit)
+
+
 @app.get("/api/stations")
 async def rail_stations():
     """GB railway stations (CRS + name + position) for the rail layer."""
@@ -540,8 +566,12 @@ async def feature_flags():
     # once Darwin Push Port credentials are configured (the simulator stays a
     # dev-only tool via ENABLE_TRAIN + TRAIN_SIM, without the UI toggle).
     s2 = app.state.settings
+    # Visible when the rail domain is on AND has a source: real Darwin creds,
+    # or the simulator for local dev. The deployed box leaves ENABLE_TRAIN
+    # unset, so nothing surfaces publicly until the real feed exists.
     flags["train"] = bool(
-        s2.enable_train and s2.darwin_host and s2.darwin_user and s2.darwin_pass
+        s2.enable_train
+        and ((s2.darwin_bootstrap and s2.darwin_user and s2.darwin_pass) or s2.train_sim)
     )
     # London Underground layer (TfL, keyless).
     flags["tube"] = bool(app.state.settings.enable_tube)

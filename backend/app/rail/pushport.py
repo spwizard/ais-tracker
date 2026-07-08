@@ -16,7 +16,10 @@ import gzip
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
+_LONDON = ZoneInfo("Europe/London")
 
 # Namespaces vary by schema minor version — match by local-name instead.
 _TS_TAG = re.compile(r"\{[^}]*\}TS$")
@@ -87,7 +90,8 @@ def parse_pushport(payload: bytes) -> list[ServiceForecast]:
             continue
         ssd = ts.get("ssd") or ""  # service start date, YYYY-MM-DD (local)
         try:
-            base = datetime.fromisoformat(ssd).replace(tzinfo=timezone.utc)
+            # Push Port times are UK local (BST in summer), not UTC.
+            base = datetime.fromisoformat(ssd).replace(tzinfo=_LONDON)
         except ValueError:
             continue
 
