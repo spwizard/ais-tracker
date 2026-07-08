@@ -30,6 +30,7 @@ import httpx
 from ..config import Settings
 from ..models import Train, TrainStop
 from ..rail.interpolate import CallingPoint, position_at
+from ..rail.operators import operator_name
 from ..rail.tiplocs import tiploc_map
 from ..store.train import TrainStore
 from .base import Source, log
@@ -104,8 +105,10 @@ class DarwinSource(Source):
         self._group = settings.darwin_group
         self._user = settings.darwin_user
         self._password = settings.darwin_pass
-        # rid -> {"ssd": str, "late": float|None, "locs": [(tpl, t, actual)], "seen": epoch}
+        # rid -> {"ssd": str, "late": float|None, "locs": [...], "seen": epoch}
         self._services: dict[str, dict] = {}
+        # rid -> (toc_code, headcode), learned from schedule (SC) messages
+        self._schedules: dict[str, tuple[str | None, str | None]] = {}
         self._samples = 0
         self._last_upsert = 0.0
         self._unresolved: set[str] = set()  # TIPLOCs we couldn't place (for logging)
@@ -142,6 +145,16 @@ class DarwinSource(Source):
                     obj = json.loads(inner)
                 except ValueError:
                     return 0
+
+        # Schedule (SC) messages carry the operator (toc) + signalling
+        # headcode (trainId), keyed by rid — cache them to name services.
+        for sched in _walk(obj, "schedule"):
+            rid = _attr(sched, "rid")
+            if rid:
+                self._schedules[str(rid)] = (
+                    _attr(sched, "toc"),
+                    _attr(sched, "trainId", "trainid"),
+                )
 
         updated = 0
         for ts in _walk(obj, "ts"):
@@ -231,10 +244,11 @@ class DarwinSource(Source):
             if fix is None:
                 continue
             late = float(svc.get("late") or 0.0)
+            toc, headcode = self._schedules.get(rid, (None, None))
             await self._store.upsert(Train(
                 id=rid,
-                headcode=None,
-                operator=None,
+                headcode=headcode,
+                operator=operator_name(toc),
                 origin=points[0].name,
                 destination=points[-1].name,
                 lat=fix.lat,
