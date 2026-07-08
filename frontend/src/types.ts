@@ -333,6 +333,22 @@ export interface Train {
 
 export type TrackedTrain = Train; // no client-side trail (route line instead)
 
+/** One row of a live station departure board. */
+export interface BoardService {
+  t: number; // epoch seconds at this station
+  id: string; // service id — click-through to the train
+  from: string | null;
+  to: string | null;
+  delay_min: number;
+}
+
+export interface RailBoard {
+  station: string | null;
+  crs: string | null;
+  total_upcoming: number;
+  services: BoardService[];
+}
+
 /** A GB railway station (for the rail layer's station markers). */
 export interface RailStation {
   crs: string;

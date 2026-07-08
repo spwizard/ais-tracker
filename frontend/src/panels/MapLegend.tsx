@@ -67,6 +67,8 @@ export function MapLegend({
   replayColorMode,
   flaggedCount,
   hasSelection,
+  showVessels,
+  showTrains,
 }: {
   showWind: boolean;
   windAvailable: boolean;
@@ -77,6 +79,9 @@ export function MapLegend({
   replayColorMode: ColorMode;
   flaggedCount: number;
   hasSelection: boolean;
+  /** Each domain's key only appears while its layer is actually visible. */
+  showVessels: boolean;
+  showTrains: boolean;
 }) {
   const wind = showWind && windAvailable;
   const waves = showWaves && wavesAvailable;
@@ -152,8 +157,9 @@ export function MapLegend({
     );
   }
 
-  // Vessel icons are visible whenever we're not in the (icon-hiding) density view.
-  if (!densityMode && !replayMode) {
+  // Vessel icons are visible whenever the layer is on and we're not in the
+  // (icon-hiding) density view.
+  if (showVessels && !densityMode && !replayMode) {
     sections.push(
       <Section key="vessels" label="Vessel type">
         <div className="grid grid-cols-2 gap-x-2 gap-y-1">
@@ -171,7 +177,38 @@ export function MapLegend({
     );
   }
 
-  if (flaggedCount > 0 || hasSelection) {
+  // Live GB trains: punctuality colours + the station badge.
+  if (showTrains && !replayMode) {
+    sections.push(
+      <Section key="trains" label="Trains (live GB rail)">
+        <div className="space-y-1">
+          <span className="flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#34d399]" />
+            <span className="text-[11px] text-foreground/90">On time</span>
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#fbbf24]" />
+            <span className="text-[11px] text-foreground/90">Running late</span>
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#f43f5e]" />
+            <span className="text-[11px] text-foreground/90">5+ min late</span>
+          </span>
+          <span className="flex items-center gap-1.5">
+            <svg viewBox="0 0 62 39" className="h-2.5 w-4 shrink-0" aria-hidden>
+              <g stroke="#e13237" fill="none">
+                <path d="M1,-8.9 46,12.4 16,26.6 61,47.9" strokeWidth="6" />
+                <path d="M0,12.4H62m0,14.2H0" strokeWidth="6.4" />
+              </g>
+            </svg>
+            <span className="text-[11px] text-foreground/90">Station · click for board</span>
+          </span>
+        </div>
+      </Section>,
+    );
+  }
+
+  if (showVessels && (flaggedCount > 0 || hasSelection)) {
     sections.push(
       <Section key="markers" label="Markers">
         <div className="space-y-1">

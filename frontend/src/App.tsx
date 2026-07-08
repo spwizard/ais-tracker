@@ -20,8 +20,11 @@ import { CameraView } from "@/panels/CameraView";
 import { CameraWall } from "@/panels/CameraWall";
 import { BusDetail } from "@/panels/BusDetail";
 import { TrainDetail } from "@/panels/TrainDetail";
+import { StationBoard } from "@/panels/StationBoard";
 import { useCameras } from "@/hooks/useCameras";
 import { useStations } from "@/hooks/useStations";
+import { useRailNetwork } from "@/hooks/useRailNetwork";
+import { useStationBoard } from "@/hooks/useStationBoard";
 import { useTubeNetwork } from "@/hooks/useTubeNetwork";
 import { useCameraWall } from "@/hooks/useCameraWall";
 import { nearbyCameras, nextCameraAhead } from "@/lib/nearbyCameras";
@@ -103,6 +106,9 @@ export default function App() {
   const trainAvailable = useFlag("train");
   const [selectedTrainId, setSelectedTrainId] = useState<string | null>(null);
   const railStations = useStations(showTrain);
+  const railNetwork = useRailNetwork(showTrain);
+  const [boardStation, setBoardStation] = useState<string | null>(null);
+  const stationBoard = useStationBoard(panels.station.open ? boardStation : null);
   const [showTube, setShowTube] = useState(false); // London Underground layer
   const tubeAvailable = useFlag("tube");
   const tubeNetwork = useTubeNetwork(showTube);
@@ -736,6 +742,14 @@ export default function App() {
     }
   };
 
+  // Station click → live departure board panel.
+  const selectStation = (st: { name: string }) => {
+    setBoardStation(st.name);
+    setOpen("station", true);
+    autoPlace("station");
+    focus("station");
+  };
+
   // Camera selection → the live camera view panel.
   const selectCamera = (c: Camera | null) => {
     setSelectedCameraId(c?.id ?? null);
@@ -886,12 +900,14 @@ export default function App() {
         selectedBusId={selectedBusId}
         trains={trains}
         stations={railStations}
+        railNetwork={railNetwork}
         showTrain={showTrain}
         tubeNetwork={tubeNetwork}
         tubeTrains={tubeTrains}
         showTube={showTube}
         onSelectTrain={selectTrain}
         selectedTrainId={selectedTrainId}
+        onSelectStation={selectStation}
         nextCameraPos={nextCameraPos}
       />
 
@@ -915,6 +931,7 @@ export default function App() {
             camera: panels.camera.open,
             bus: panels.bus.open,
             train: panels.train.open,
+            station: panels.station.open,
             zones: panels.zones.open,
             analyst: panels.analyst.open,
           }}
@@ -1081,6 +1098,17 @@ export default function App() {
                 zoom: 11,
               })
             }
+          />
+        )}
+        {panels.station.open && boardStation && (
+          <StationBoard
+            chrome={chromeFor("station")}
+            stationQuery={boardStation}
+            board={stationBoard}
+            onSelectService={(id) => {
+              const t = trainsRef.current.get(id);
+              if (t) selectTrain(t);
+            }}
           />
         )}
         {panels.camera.open && selectedCamera && (
@@ -1265,6 +1293,8 @@ export default function App() {
           replayColorMode={replayColorMode}
           flaggedCount={flagged.size}
           hasSelection={selectedMmsi != null}
+          showVessels={showVessels}
+          showTrains={showTrain}
         />
 
         {(showWind || showWaves) && (

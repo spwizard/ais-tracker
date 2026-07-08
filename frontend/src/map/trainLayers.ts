@@ -4,10 +4,11 @@
  * ticks so 125mph services glide instead of stepping. Visible at national
  * zoom — that's the whole point of a rail picture.
  */
-import { IconLayer, PathLayer, ScatterplotLayer, TextLayer } from "@deck.gl/layers";
+import { GeoJsonLayer, IconLayer, PathLayer, ScatterplotLayer, TextLayer } from "@deck.gl/layers";
 import type { RailStation, TrackedTrain } from "@/types";
 import { deadReckon, DR_SCRATCH } from "./layers";
 import { getTrainIconAtlas, TRAIN_ICON_MAPPING } from "./trainIcons";
+import { getStationIconAtlas, STATION_ICON_MAPPING } from "./stationIcons";
 
 export const TRAIN_MIN_ZOOM = 5;
 // Stations fade in as you zoom: 2,600 dots are texture at national zoom,
@@ -30,35 +31,64 @@ function lateColor(d: TrackedTrain): [number, number, number] {
 export interface TrainLayerOptions {
   trains: TrackedTrain[];
   stations: RailStation[];
+  railNetwork: unknown | null; // GB route geometry (Network Rail, GeoJSON)
   currentTime: number; // epoch seconds — drives the between-tick glide
   zoom: number;
   selectedId: string | null;
   onClick: (t: TrackedTrain | null) => void;
+  onStationClick: (s: RailStation) => void;
 }
 
 export function buildTrainLayers(opts: TrainLayerOptions) {
-  const { trains, stations, currentTime, zoom, selectedId, onClick } = opts;
+  const { trains, stations, railNetwork, currentTime, zoom, selectedId, onClick, onStationClick } = opts;
   if (zoom < TRAIN_MIN_ZOOM) return [];
 
   const layers: unknown[] = [];
 
-  // Stations: subtle dots from regional zoom, names once close in.
+  // The actual lines: Network Rail's route geometry as a muted steel web —
+  // context for the trains without competing with the tube's neon.
+  if (railNetwork) {
+    layers.push(
+      new GeoJsonLayer({
+        id: "rail-network",
+        data: railNetwork as never,
+        stroked: true,
+        filled: false,
+        getLineColor: [120, 136, 160, zoom >= 9 ? 110 : 70],
+        getLineWidth: 1.4,
+        lineWidthUnits: "pixels",
+        lineWidthMinPixels: 0.75,
+        updateTriggers: { getLineColor: zoom >= 9 },
+      }),
+    );
+  }
+
+  // Stations: platform-sign badges from regional zoom, names once close in.
+  // Clicking one opens its live departure board.
   if (stations.length > 0 && zoom >= STATION_DOT_ZOOM) {
     layers.push(
-      new ScatterplotLayer<RailStation>({
+      new IconLayer<RailStation>({
         id: "rail-stations",
         data: stations,
         pickable: true,
+        iconAtlas: getStationIconAtlas(),
+        iconMapping: STATION_ICON_MAPPING,
+        getIcon: () => "station",
         getPosition: (d) => [d.lon, d.lat],
-        getRadius: 3,
-        radiusUnits: "pixels",
-        radiusMinPixels: 2,
-        radiusMaxPixels: 5,
-        getFillColor: [148, 163, 184, zoom >= STATION_LABEL_ZOOM ? 230 : 150],
-        stroked: true,
-        getLineColor: [15, 23, 42, 200],
-        lineWidthMinPixels: 1,
-        updateTriggers: { getFillColor: zoom >= STATION_LABEL_ZOOM },
+        getSize: zoom >= STATION_LABEL_ZOOM ? 16 : 12,
+        sizeUnits: "pixels",
+        sizeMinPixels: 9,
+        sizeMaxPixels: 18,
+        // National Rail red — the map convention for the double arrow.
+        getColor: [225, 50, 55, zoom >= STATION_LABEL_ZOOM ? 245 : 175],
+        onClick: (info) => {
+          const st = info.object as RailStation | undefined;
+          if (st) onStationClick(st);
+        },
+        updateTriggers: {
+          getSize: zoom >= STATION_LABEL_ZOOM,
+          getColor: zoom >= STATION_LABEL_ZOOM,
+        },
       }),
     );
   }

@@ -148,9 +148,11 @@ interface MapViewProps {
   // GB trains (rail, Tier-1 inferred positions).
   trains: TrackedTrain[];
   stations: RailStation[];
+  railNetwork: unknown | null;
   showTrain: boolean;
   onSelectTrain: (t: TrackedTrain | null) => void;
   selectedTrainId: string | null;
+  onSelectStation: (s: RailStation) => void;
   // London Underground layer.
   tubeNetwork: { lines: TubeLine[]; stations: TubeStation[] };
   tubeTrains: TubeTrain[];
@@ -229,9 +231,11 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
     selectedBusId,
     trains,
     stations,
+    railNetwork,
     showTrain,
     onSelectTrain,
     selectedTrainId,
+    onSelectStation,
     tubeNetwork,
     tubeTrains,
     showTube,
@@ -532,10 +536,12 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
         ? buildTrainLayers({
             trains,
             stations,
+            railNetwork,
             currentTime,
             zoom,
             selectedId: selectedTrainId,
             onClick: onSelectTrain,
+            onStationClick: onSelectStation,
           })
         : []),
       // London Underground — the network as light, once London fills the view.
@@ -582,9 +588,11 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
       onSelectBus,
       trains,
       stations,
+      railNetwork,
       showTrain,
       selectedTrainId,
       onSelectTrain,
+      onSelectStation,
       tubeNetwork,
       tubeTrains,
       showTube,
