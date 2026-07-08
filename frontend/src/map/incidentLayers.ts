@@ -22,6 +22,7 @@ const GLYPH: Record<string, string> = {
   works: "⚒",
   event: "◆",
   aerial: "✚",
+  congestion: "≣",
   other: "•",
 };
 

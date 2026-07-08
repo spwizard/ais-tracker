@@ -366,7 +366,7 @@ export interface RailBoard {
 export interface Incident {
   id: string;
   source: string; // "tfl-road", …
-  category: "collision" | "breakdown" | "hazard" | "works" | "delay" | "event" | "aerial" | "other";
+  category: "collision" | "breakdown" | "hazard" | "works" | "delay" | "event" | "aerial" | "congestion" | "other";
   severity: "minor" | "moderate" | "serious";
   confidence: "official" | "inferred" | "reported";
   title: string;

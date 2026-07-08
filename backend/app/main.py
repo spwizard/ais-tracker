@@ -155,18 +155,23 @@ async def _history_loop(app: FastAPI) -> None:
 
 
 async def _heli_loop(app: FastAPI) -> None:
-    """Watch rotorcraft for sustained circling → inferred incidents."""
-    detector = app.state.heli_detector
-    if detector is None or app.state.incident_store is None or app.state.air_store is None:
+    """Inference eyes: helicopter circling + bus-swarm road holds."""
+    if app.state.incident_store is None:
         return
+    heli = app.state.heli_detector
+    swarm = app.state.swarm_detector
     while True:
         await asyncio.sleep(10)
+        now = time.time()
         try:
-            aircraft = await app.state.air_store.snapshot()
-            incs = detector.update(aircraft, time.time())
-            await app.state.incident_store.replace_source("heli", incs)
+            if heli is not None and app.state.air_store is not None:
+                incs = heli.update(await app.state.air_store.snapshot(), now)
+                await app.state.incident_store.replace_source("heli", incs)
+            if swarm is not None and app.state.bus_store is not None:
+                incs = swarm.update(await app.state.bus_store.snapshot(), now)
+                await app.state.incident_store.replace_source("bus-swarm", incs)
         except Exception as exc:  # noqa: BLE001
-            log.warning("heli detection failed: %s", exc)
+            log.warning("inference detection failed: %s", exc)
 
 
 async def _risk_loop(app: FastAPI) -> None:
@@ -246,9 +251,10 @@ async def lifespan(app: FastAPI):
     incident_store = IncidentStore() if settings.enable_incidents else None
     app.state.incident_store = incident_store
     from .incidents.helicopter import HelicopterDetector
-    app.state.heli_detector = (
-        HelicopterDetector() if (incident_store is not None and settings.enable_air) else None
-    )
+    from .incidents.bus_swarm import BusSwarmDetector
+    _inc = incident_store is not None
+    app.state.heli_detector = HelicopterDetector() if (_inc and settings.enable_air) else None
+    app.state.swarm_detector = BusSwarmDetector() if (_inc and settings.enable_bus) else None
     # Aircraft enrichment (registration / operator / route / photo) via adsbdb.
     app.state.air_enricher = AircraftEnricher() if settings.enable_air else None
     # Land domain: London traffic cameras (TfL JamCams), lazily fetched + cached.
