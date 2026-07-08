@@ -44,6 +44,22 @@ class CameraAnalysis(BaseModel):
     summary: str
 
 
+class IncidentVerdict(BaseModel):
+    """Camera check of a reported incident, near the scene."""
+    verdict: Literal["confirmed", "unclear", "nothing"]
+    note: str  # one short line of what the camera actually shows
+
+
+VERIFY_SYSTEM = (
+    "You are verifying a reported incident by looking at a nearby traffic "
+    "camera. Report only what is visibly true in the image. Stay aggregate and "
+    "anonymous — never identify a vehicle, plate or person. 'confirmed' only if "
+    "the scene visibly supports the report (e.g. stopped traffic, emergency "
+    "vehicles, a collision, a crowd, hazards); 'nothing' if it looks normal/"
+    "clear; 'unclear' if the view can't tell. Keep the note under 16 words."
+)
+
+
 class VisionUnavailable(RuntimeError):
     pass
 
@@ -102,4 +118,31 @@ class CameraAnalyst:
         out = resp.parsed_output
         if out is None:
             raise VisionUnavailable("model returned no analysis")
+        return out
+
+    async def verify(self, image_url: str, incident_desc: str) -> IncidentVerdict:
+        """Look through a camera and judge whether it supports a reported incident."""
+        client = self._ensure_client()
+        img = await self._http.get(image_url)
+        img.raise_for_status()
+        media_type = img.headers.get("content-type", "image/jpeg").split(";")[0]
+        b64 = base64.standard_b64encode(img.content).decode()
+        resp = await client.with_options(timeout=30).messages.parse(
+            model=self._model,
+            max_tokens=200,
+            system=VERIFY_SYSTEM,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": b64}},
+                        {"type": "text", "text": f"Reported incident: {incident_desc}\nWhat does this camera show?"},
+                    ],
+                }
+            ],
+            output_format=IncidentVerdict,
+        )
+        out = resp.parsed_output
+        if out is None:
+            raise VisionUnavailable("model returned no verdict")
         return out

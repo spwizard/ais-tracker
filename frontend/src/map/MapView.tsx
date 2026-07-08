@@ -167,6 +167,7 @@ interface MapViewProps {
   incidents: Incident[];
   showIncidents: boolean;
   onSelectIncident: (i: Incident | null) => void;
+  onSelectTubeStation: (s: TubeStation) => void;
   // The camera the selected bus is heading toward next — pulse a ring on it.
   nextCameraPos: [number, number] | null;
 }
@@ -255,6 +256,7 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
     incidents,
     showIncidents,
     onSelectIncident,
+    onSelectTubeStation,
     nextCameraPos,
   } = props;
 
@@ -577,6 +579,7 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
             currentTime,
             zoom,
             onClickTrain: () => void 0,
+            onClickStation: onSelectTubeStation,
           })
         : []),
       // Incidents (Argus spine) — located things-happening, on top of the map.
@@ -633,6 +636,7 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
       incidents,
       showIncidents,
       onSelectIncident,
+      onSelectTubeStation,
       nextCameraPos,
       densityMode,
       drawing,

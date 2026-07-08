@@ -37,7 +37,7 @@ export function buildIncidentLayers(opts: IncidentLayerOptions) {
   const { incidents, currentTime, zoom, onClick } = opts;
   if (zoom < INCIDENT_MIN_ZOOM || incidents.length === 0) return [];
   const pulse = 0.5 + 0.5 * Math.sin(currentTime * 3);
-  const serious = incidents.filter((i) => i.severity === "serious");
+  const serious = incidents.filter((i) => i.severity === "serious" && i.verification !== "cleared");
 
   return [
     // Pulsing halo under serious incidents.
@@ -59,7 +59,11 @@ export function buildIncidentLayers(opts: IncidentLayerOptions) {
       getRadius: (d) => (d.severity === "serious" ? 8 : 6),
       radiusUnits: "pixels",
       radiusMinPixels: 5,
-      getFillColor: (d) => SEVERITY_COLOR[d.severity] ?? SEVERITY_COLOR.minor,
+      getFillColor: (d) => {
+        const c = SEVERITY_COLOR[d.severity] ?? SEVERITY_COLOR.minor;
+        // A camera looked and saw nothing → fade it right back.
+        return d.verification === "cleared" ? [c[0], c[1], c[2], 70] : [...c, 255];
+      },
       stroked: true,
       getLineColor: [12, 18, 32, 220],
       lineWidthMinPixels: 1.5,

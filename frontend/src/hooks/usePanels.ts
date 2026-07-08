@@ -10,8 +10,10 @@ export type PanelId =
   | "bus"
   | "train"
   | "station"
+  | "tubeboard"
   | "railpulse"
   | "londonpulse"
+  | "incidents"
   | "zones"
   | "analyst";
 
@@ -25,8 +27,10 @@ export const PANEL_IDS: PanelId[] = [
   "bus",
   "train",
   "station",
+  "tubeboard",
   "railpulse",
   "londonpulse",
+  "incidents",
   "zones",
   "analyst",
 ];
@@ -42,8 +46,10 @@ export const PANEL_W: Record<PanelId, number> = {
   bus: 340,
   train: 340,
   station: 340,
+  tubeboard: 340,
   railpulse: 340,
   londonpulse: 320,
+  incidents: 320,
   zones: 288,
   analyst: 380,
 };
@@ -59,8 +65,10 @@ export const PANEL_EST_H: Record<PanelId, number> = {
   bus: 320,
   train: 400,
   station: 420,
+  tubeboard: 420,
   railpulse: 420,
   londonpulse: 340,
+  incidents: 440,
   zones: 360,
   analyst: 540,
 };
@@ -133,6 +141,11 @@ function defaults(): PanelMap {
       x: vw - MARGIN - PANEL_W.station,
       y: MARGIN + PANEL_EST_H.stats + GAP,
     },
+    tubeboard: {
+      open: false,
+      x: vw - MARGIN - PANEL_W.tubeboard,
+      y: MARGIN + PANEL_EST_H.stats + GAP,
+    },
     railpulse: {
       open: false,
       x: vw - MARGIN - PANEL_W.railpulse,
@@ -141,6 +154,11 @@ function defaults(): PanelMap {
     londonpulse: {
       open: false,
       x: vw - MARGIN - PANEL_W.londonpulse,
+      y: MARGIN + PANEL_EST_H.stats + GAP,
+    },
+    incidents: {
+      open: false,
+      x: MARGIN,
       y: MARGIN + PANEL_EST_H.stats + GAP,
     },
     zones: {

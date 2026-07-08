@@ -170,6 +170,8 @@ async def _heli_loop(app: FastAPI) -> None:
             if swarm is not None and app.state.bus_store is not None:
                 incs = swarm.update(await app.state.bus_store.snapshot(), now)
                 await app.state.incident_store.replace_source("bus-swarm", incs)
+            if app.state.incident_verifier is not None:
+                await app.state.incident_verifier.run(app.state.incident_store, now)
         except Exception as exc:  # noqa: BLE001
             log.warning("inference detection failed: %s", exc)
 
@@ -254,7 +256,11 @@ async def lifespan(app: FastAPI):
     from .incidents.bus_swarm import BusSwarmDetector
     _inc = incident_store is not None
     app.state.heli_detector = HelicopterDetector() if (_inc and settings.enable_air) else None
-    app.state.swarm_detector = BusSwarmDetector() if (_inc and settings.enable_bus) else None
+    app.state.swarm_detector = (
+        BusSwarmDetector() if (_inc and settings.enable_bus and settings.enable_bus_swarm) else None
+    )
+    from .incidents.verify import IncidentVerifier
+    app.state.incident_verifier = None  # set after camera analyst/catalog exist
     # Aircraft enrichment (registration / operator / route / photo) via adsbdb.
     app.state.air_enricher = AircraftEnricher() if settings.enable_air else None
     # Land domain: London traffic cameras (TfL JamCams), lazily fetched + cached.
@@ -269,6 +275,8 @@ async def lifespan(app: FastAPI):
         if settings.enable_cameras
         else None
     )
+    if incident_store is not None and app.state.camera_analyst is not None:
+        app.state.incident_verifier = IncidentVerifier(app.state.camera_analyst, app.state.cameras)
 
     broadcaster = Broadcaster(
         store, settings.broadcast_hz,
@@ -692,6 +700,36 @@ async def rail_stations():
             {"crs": s.crs, "name": s.name, "lat": s.lat, "lon": s.lon}
             for s in stations_by_crs().values()
         ]
+    }
+
+
+@app.get("/api/tube/board")
+async def tube_board(id: str, limit: int = 14):
+    """Live tube departure board for a station (TfL StopPoint arrivals)."""
+    if app.state.tube_network is None:
+        return {"services": []}
+    key = app.state.settings.tfl_app_key
+    params = {"app_key": key} if key else {}
+    try:
+        r = await _http.get(f"https://api.tfl.gov.uk/StopPoint/{id}/Arrivals", params=params)
+        r.raise_for_status()
+        preds = r.json()
+    except httpx.HTTPError:
+        return {"services": []}
+    preds.sort(key=lambda p: p.get("timeToStation", 1e9))
+    station = preds[0]["stationName"].replace(" Underground Station", "") if preds else None
+    return {
+        "station": station,
+        "services": [
+            {
+                "line": p.get("lineId"),
+                "line_name": p.get("lineName"),
+                "to": (p.get("towards") or p.get("destinationName") or "").replace(" Underground Station", ""),
+                "tts": p.get("timeToStation"),
+                "platform": p.get("platformName"),
+            }
+            for p in preds[: max(1, min(limit, 30))]
+        ],
     }
 
 

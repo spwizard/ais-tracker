@@ -21,16 +21,19 @@ import { CameraWall } from "@/panels/CameraWall";
 import { BusDetail } from "@/panels/BusDetail";
 import { TrainDetail } from "@/panels/TrainDetail";
 import { StationBoard } from "@/panels/StationBoard";
+import { TubeBoard } from "@/panels/TubeBoard";
 import { RailPulse } from "@/panels/RailPulse";
 import { useCameras } from "@/hooks/useCameras";
 import { useStations } from "@/hooks/useStations";
 import { useRailNetwork } from "@/hooks/useRailNetwork";
 import { useStationBoard } from "@/hooks/useStationBoard";
+import { useTubeBoard } from "@/hooks/useTubeBoard";
 import { useRailPulse } from "@/hooks/useRailPulse";
 import { useDelayHotspots, type Hotspot } from "@/hooks/useDelayHotspots";
 import { useLondonPulse } from "@/hooks/useLondonPulse";
 import { LondonPulse } from "@/panels/LondonPulse";
 import { IncidentCard } from "@/panels/IncidentCard";
+import { IncidentsPanel } from "@/panels/IncidentsPanel";
 import { useTubeNetwork } from "@/hooks/useTubeNetwork";
 import { useCameraWall } from "@/hooks/useCameraWall";
 import { nearbyCameras, nextCameraAhead } from "@/lib/nearbyCameras";
@@ -115,6 +118,8 @@ export default function App() {
   const railNetwork = useRailNetwork(showTrain);
   const [boardStation, setBoardStation] = useState<string | null>(null);
   const stationBoard = useStationBoard(panels.station.open ? boardStation : null);
+  const [tubeStation, setTubeStation] = useState<{ id: string; name: string } | null>(null);
+  const tubeBoard = useTubeBoard(panels.tubeboard.open ? (tubeStation?.id ?? null) : null);
   const railPulse = useRailPulse(panels.railpulse.open);
   const [showHotspots, setShowHotspots] = useState(false);
   const delayHotspots = useDelayHotspots(showTrain && showHotspots);
@@ -383,11 +388,11 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [version, tubeRef, showTube]);
 
-  const incidents = useMemo<Incident[]>(() => {
-    if (!showIncidents) return [];
+  const allIncidents = useMemo<Incident[]>(() => {
     return Array.from(incidentsRef.current.values());
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [version, incidentsRef, showIncidents]);
+  }, [version, incidentsRef]);
+  const incidents = showIncidents ? allIncidents : [];
   const selectedIncident = useMemo(
     () => (selectedIncidentId ? incidentsRef.current.get(selectedIncidentId) ?? null : null),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -796,6 +801,32 @@ export default function App() {
     [flyToLondonIfAway],
   );
 
+  const focusIncident = (i: Incident) => {
+    setSelectedIncidentId(i.id);
+    mapRef.current?.flyTo({ longitude: i.lon, latitude: i.lat, zoom: 13 });
+  };
+  // One-click Argus London focus. The incident spine is the story, so we quiet
+  // everything that would carpet the map (vessels, air, and the ~8k-strong bus
+  // fleet) and light up only the eyes that read as signal: incidents, cameras
+  // and the tube network. Buses stay a manual toggle.
+  const enterArgusLondon = () => {
+    setShowVessels(false);
+    setShowAir(false);
+    setShowBus(false);
+    setShowIncidents(true);
+    setShowCameras(true);
+    setShowTube(true);
+    mapRef.current?.flyTo({ longitude: -0.11, latitude: 51.5, zoom: 11 });
+    setOpen("incidents", true);
+    autoPlace("incidents");
+    focus("incidents");
+  };
+  const selectTubeStation = (st: { id: string; name: string }) => {
+    setTubeStation(st);
+    setOpen("tubeboard", true);
+    autoPlace("tubeboard");
+    focus("tubeboard");
+  };
   // Camera selection → the live camera view panel.
   const selectCamera = (c: Camera | null) => {
     setSelectedCameraId(c?.id ?? null);
@@ -977,6 +1008,7 @@ export default function App() {
         incidents={incidents}
         showIncidents={showIncidents}
         onSelectIncident={(i: Incident | null) => setSelectedIncidentId(i?.id ?? null)}
+        onSelectTubeStation={(st) => selectTubeStation({ id: st.id, name: st.name })}
         onSelectTrain={selectTrain}
         selectedTrainId={selectedTrainId}
         onSelectStation={selectStation}
@@ -1004,8 +1036,10 @@ export default function App() {
             bus: panels.bus.open,
             train: panels.train.open,
             station: panels.station.open,
+            tubeboard: panels.tubeboard.open,
             railpulse: panels.railpulse.open,
             londonpulse: panels.londonpulse.open,
+            incidents: panels.incidents.open,
             zones: panels.zones.open,
             analyst: panels.analyst.open,
           }}
@@ -1095,6 +1129,7 @@ export default function App() {
             showIncidents={showIncidents}
             onToggleIncidents={toggleLondonLayer(setShowIncidents)}
             incidentsAvailable={incidentsAvailable}
+            onEnterArgusLondon={incidentsAvailable ? enterArgusLondon : undefined}
             onOpenRailPulse={() => {
               if (panels.railpulse.open) setOpen("railpulse", false);
               else { setOpen("railpulse", true); autoPlace("railpulse"); focus("railpulse"); }
@@ -1187,6 +1222,9 @@ export default function App() {
               })
             }
           />
+        )}
+        {panels.tubeboard.open && tubeStation && (
+          <TubeBoard chrome={chromeFor("tubeboard")} stationName={tubeStation.name} board={tubeBoard} />
         )}
         {panels.station.open && boardStation && (
           <StationBoard
@@ -1333,6 +1371,13 @@ export default function App() {
           }}
         />
 
+        {panels.incidents.open && (
+          <IncidentsPanel
+            chrome={chromeFor("incidents")}
+            incidents={allIncidents}
+            onFocus={focusIncident}
+          />
+        )}
         {selectedIncident && (
           <IncidentCard
             incident={selectedIncident}

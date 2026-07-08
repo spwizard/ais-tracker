@@ -87,6 +87,10 @@ class Settings(BaseSettings):
 
     # --- Incidents: Argus spine (TfL road disruptions + future eyes) --------
     enable_incidents: bool = Field(default=True, alias="ENABLE_INCIDENTS")
+    # Bus-swarm inference is off by default: positional stall-detection can't
+    # distinguish a genuine blockage from baseline bus-corridor congestion
+    # without scheduled-route (diversion) data. Kept for when that lands.
+    enable_bus_swarm: bool = Field(default=False, alias="ENABLE_BUS_SWARM")
 
     # --- Land: London Underground (TfL — free, keyless; app_key raises limits) --
     enable_tube: bool = Field(default=True, alias="ENABLE_TUBE")

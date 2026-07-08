@@ -20,6 +20,7 @@ import {
   Activity,
   Landmark,
   TriangleAlert,
+  Eye,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
@@ -58,6 +59,7 @@ interface LayerControlsProps {
   showIncidents?: boolean;
   onToggleIncidents?: (v: boolean) => void;
   incidentsAvailable?: boolean;
+  onEnterArgusLondon?: () => void;
   busAvailable: boolean;
   trainAvailable: boolean;
   tubeAvailable: boolean;
@@ -177,6 +179,7 @@ export function LayerControls({
   showIncidents,
   onToggleIncidents,
   incidentsAvailable,
+  onEnterArgusLondon,
   busAvailable,
   trainAvailable,
   tubeAvailable,
@@ -244,6 +247,15 @@ export function LayerControls({
 
         {(busAvailable || camerasAvailable || trainAvailable || tubeAvailable) && (
           <Section title="Land">
+            {onEnterArgusLondon && (
+              <button
+                onClick={onEnterArgusLondon}
+                className="mb-1 flex w-full items-center gap-2 rounded-md bg-primary/10 px-2.5 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/20"
+              >
+                <Eye className="h-3.5 w-3.5" />
+                Argus London — focus the city
+              </button>
+            )}
             {incidentsAvailable && onToggleIncidents && (
               <Row
                 icon={TriangleAlert}

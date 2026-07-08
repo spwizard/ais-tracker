@@ -17,6 +17,7 @@ import { PathStyleExtension } from "@deck.gl/extensions";
 import type { TubeLine, TubeStation, TubeTrain } from "@/types";
 import { deadReckon, DR_SCRATCH } from "./layers";
 import { getTrainIconAtlas, TRAIN_ICON_MAPPING } from "./trainIcons";
+import { getRoundelAtlas, ROUNDEL_MAPPING } from "./tubeStationIcons";
 
 export const TUBE_MIN_ZOOM = 8.3; // the tube is a London artefact — appear with London
 const LABEL_ZOOM = 12;
@@ -86,10 +87,11 @@ export interface TubeLayerOptions {
   currentTime: number;
   zoom: number;
   onClickTrain: (t: TubeTrain | null) => void;
+  onClickStation?: (s: TubeStation) => void;
 }
 
 export function buildTubeLayers(opts: TubeLayerOptions) {
-  const { network, trains, currentTime, zoom, onClickTrain } = opts;
+  const { network, trains, currentTime, zoom, onClickTrain, onClickStation } = opts;
   if (zoom < TUBE_MIN_ZOOM || network.lines.length === 0) return [];
 
   const layers: unknown[] = [];
@@ -148,21 +150,35 @@ export function buildTubeLayers(opts: TubeLayerOptions) {
     }),
   );
 
-  // 2. Stations — roundel-ish: dark ring, white centre; interchanges bigger.
+  // 2. Stations — the real Underground roundel; click one for its live
+  //    departure board. Collision-filtered so dense central London stays
+  //    readable; interchanges (more lines) win when roundels would overlap.
+  const stationClose = zoom >= LABEL_ZOOM;
   layers.push(
-    new ScatterplotLayer<TubeStation>({
+    new IconLayer<TubeStation>({
       id: "tube-stations",
       data: network.stations,
       pickable: true,
+      iconAtlas: getRoundelAtlas(),
+      iconMapping: ROUNDEL_MAPPING,
+      getIcon: () => "roundel",
       getPosition: (d) => [d.lon, d.lat],
-      getRadius: (d) => (d.lines.length > 1 ? 4.4 : 3),
-      radiusUnits: "pixels",
-      radiusMinPixels: 2,
-      radiusMaxPixels: 7,
-      getFillColor: [245, 248, 252, 235],
-      stroked: true,
-      getLineColor: [12, 18, 32, 230],
-      lineWidthMinPixels: 1.6,
+      getSize: stationClose ? 17 : 12,
+      sizeUnits: "pixels",
+      sizeMinPixels: 10,
+      sizeMaxPixels: 20,
+      onClick: (info) => {
+        const st = info.object as TubeStation | undefined;
+        if (st && onClickStation) onClickStation(st);
+      },
+      extensions: [new CollisionFilterExtension()],
+      ...({
+        collisionEnabled: true,
+        collisionGroup: "tube-roundels",
+        collisionTestProps: { sizeScale: 1.6 },
+        getCollisionPriority: (d: TubeStation) => d.lines.length,
+      } as object),
+      updateTriggers: { getSize: stationClose },
     }),
   );
   if (zoom >= LABEL_ZOOM) {

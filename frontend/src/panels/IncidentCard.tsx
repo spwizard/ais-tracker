@@ -2,9 +2,9 @@
  * Incident detail card — a compact popover for a clicked incident, with the
  * eyes-on-alert camera action when cameras are nearby (same as alert toasts).
  */
-import { X, Cctv, AlertTriangle, ExternalLink } from "lucide-react";
+import { X, Cctv, AlertTriangle, ExternalLink, CheckCircle2, EyeOff } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { Incident } from "@/types";
+import { incidentTier, type Incident } from "@/types";
 
 const SEV_STYLE: Record<string, string> = {
   serious: "bg-rose-500/15 text-rose-400",
@@ -56,6 +56,30 @@ export function IncidentCard({
       )}
       {incident.location && (
         <p className="mb-2 text-[11px] text-muted-foreground">{incident.location}</p>
+      )}
+
+      {/* Camera verification — the credibility line */}
+      {incident.verification_note && (
+        <div
+          className={cn(
+            "mb-2 flex items-start gap-2 rounded-lg px-2.5 py-1.5 text-[12px] leading-snug",
+            incidentTier(incident) === "confirmed"
+              ? "bg-emerald-500/10 text-emerald-300"
+              : "bg-foreground/5 text-muted-foreground",
+          )}
+        >
+          {incidentTier(incident) === "confirmed" ? (
+            <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-400" />
+          ) : (
+            <EyeOff className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          )}
+          <span>
+            {incident.verification_note}
+            {incident.verified_camera && (
+              <span className="text-muted-foreground"> — via {incident.verified_camera}</span>
+            )}
+          </span>
+        </div>
       )}
 
       <div className="flex items-center gap-2 border-t border-foreground/10 pt-2">

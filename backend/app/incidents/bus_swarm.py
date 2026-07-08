@@ -11,15 +11,19 @@ from __future__ import annotations
 from collections import deque
 
 from ..models import Bus, Incident
-from .helicopter import _dist_m, _nearest_place
+from .helicopter import _dist_m, nearest_station
 
-WINDOW_SEC = 240.0
+WINDOW_SEC = 300.0
 STALL_KMH = 4.0        # essentially stopped
-MOVED_KMH = 12.0       # was genuinely in transit earlier (not idling at a stand)
-STALL_SEC = 120.0      # sustained this long
-CLUSTER_M = 300.0      # buses within this of each other cluster
+MOVED_KMH = 15.0       # was genuinely in transit earlier (not idling at a stand)
+STALL_SEC = 180.0      # sustained 3 min — a real hold, not a red light
+CLUSTER_M = 250.0      # buses within this of each other cluster
 MIN_ROUTES = 4         # distinct routes stalled together → not a coincidence
 MIN_BUSES = 5
+# Bus stations/interchanges sit at rail stations and always have many idling
+# buses from many routes — the dominant false-positive source. Require the
+# cluster to be clear of any station so we only flag genuine mid-road holds.
+STATION_CLEARANCE_M = 350.0
 
 
 def _kmh(a, b, dt: float) -> float:
@@ -83,7 +87,11 @@ class BusSwarmDetector:
                 continue
             clat = sum(m.lat for m in members) / len(members)
             clon = sum(m.lon for m in members) / len(members)
-            place = _nearest_place(clat, clon)
+            place, station_m = nearest_station(clat, clon)
+            # Skip clusters sitting on a station — that's an interchange stand,
+            # not a road blockage (kills the false-positive storm).
+            if station_m < STATION_CLEARANCE_M:
+                continue
             rlist = ", ".join(sorted(routes)[:6])
             # Stable id from the rounded centre so the incident persists as the
             # jam does rather than flickering as membership shifts slightly.

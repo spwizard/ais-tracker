@@ -163,6 +163,13 @@ class Incident(BaseModel):
     lon: float
     url: Optional[str] = None
 
+    # Camera verification (Argus's credibility superpower): an inferred incident
+    # near a camera is checked with vision → confirmed / cleared, or None.
+    verification: Optional[str] = None  # "confirmed" | "cleared" | None
+    verification_note: Optional[str] = None  # Claude's one-line finding
+    verified_camera: Optional[str] = None  # camera name it looked through
+    verified_at: float = 0.0
+
     ts: float = 0.0  # first seen / start (epoch seconds)
     updated: float = 0.0  # last update
 

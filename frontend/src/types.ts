@@ -375,8 +375,21 @@ export interface Incident {
   lat: number;
   lon: number;
   url: string | null;
+  verification: "confirmed" | "cleared" | null;
+  verification_note: string | null;
+  verified_camera: string | null;
+  verified_at: number;
   ts: number;
   updated: number;
+}
+
+/** Credibility tier derived from source confidence + camera verification. */
+export type IncidentTier = "confirmed" | "reported" | "suspected" | "cleared";
+export function incidentTier(i: Incident): IncidentTier {
+  if (i.verification === "cleared") return "cleared";
+  if (i.verification === "confirmed") return "confirmed";
+  if (i.confidence === "official") return "reported";
+  return "suspected"; // inferred, not (yet) camera-confirmed
 }
 
 /** A GB railway station (for the rail layer's station markers). */

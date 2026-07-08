@@ -30,15 +30,23 @@ def _dist_m(lat1, lon1, lat2, lon2) -> float:
     return 6_371_000 * math.hypot(dlat, dlon * math.cos(p))
 
 
-def _nearest_place(lat: float, lon: float) -> str | None:
+def nearest_station(lat: float, lon: float) -> tuple[str | None, float]:
+    """Nearest rail station name + distance in metres."""
     best = None
-    best_d = 1e18
+    best_lat = best_lon = 0.0
+    best_d2 = 1e18
     for st in stations_by_crs().values():
         d = (st.lat - lat) ** 2 + (st.lon - lon) ** 2
-        if d < best_d:
-            best_d = d
-            best = st.name
-    return best
+        if d < best_d2:
+            best_d2 = d
+            best, best_lat, best_lon = st.name, st.lat, st.lon
+    if best is None:
+        return None, 1e9
+    return best, _dist_m(lat, lon, best_lat, best_lon)
+
+
+def _nearest_place(lat: float, lon: float) -> str | None:
+    return nearest_station(lat, lon)[0]
 
 
 class HelicopterDetector:
