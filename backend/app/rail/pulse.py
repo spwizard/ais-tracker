@@ -28,10 +28,11 @@ def compute_pulse(trains: Iterable[Train]) -> dict:
     total = len(trains)
     if total == 0:
         return {"total": 0, "on_time_pct": None, "late": 0, "bad": 0, "avg_delay": 0.0,
-                "operators": [], "worst": None, "fastest": None}
+                "operators": [], "worst": None, "fastest": None, "reasons": []}
 
     late = bad = 0
     delay_sum = 0.0
+    reason_counts: dict[str, int] = defaultdict(int)
     # operator -> [count, late, delay_sum]
     by_op: dict[str, list[float]] = defaultdict(lambda: [0.0, 0.0, 0.0])
     for t in trains:
@@ -41,6 +42,8 @@ def compute_pulse(trains: Iterable[Train]) -> dict:
             late += 1
         if d >= BAD_MIN:
             bad += 1
+        if d >= LATE_MIN and t.delay_reason:
+            reason_counts[t.delay_reason] += 1
         if t.operator:
             row = by_op[t.operator]
             row[0] += 1
@@ -76,7 +79,10 @@ def compute_pulse(trains: Iterable[Train]) -> dict:
     if worst_t and (worst_t.delay_min or 0) >= 1:
         worst = {"id": worst_t.id, "label": _label(worst_t),
                  "delay_min": round(worst_t.delay_min or 0), "next": worst_t.next_name,
+                 "reason": worst_t.delay_reason,
                  "lat": worst_t.lat, "lon": worst_t.lon}
+    top_reasons = sorted(reason_counts.items(), key=lambda kv: -kv[1])[:4]
+    reasons = [{"reason": r, "count": c} for r, c in top_reasons]
     fastest = None
     if fast_t and (fast_t.speed_kn or 0) > 0:
         fastest = {"id": fast_t.id, "label": _label(fast_t),
@@ -92,4 +98,5 @@ def compute_pulse(trains: Iterable[Train]) -> dict:
         "operators": operators,
         "worst": worst,
         "fastest": fastest,
+        "reasons": reasons,
     }

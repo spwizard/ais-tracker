@@ -139,7 +139,7 @@ export function RailPulse({
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-xs">{pulse.worst.label}</span>
                       <span className="block truncate text-[10px] text-muted-foreground">
-                        most delayed{pulse.worst.next ? ` · near ${pulse.worst.next}` : ""}
+                        {pulse.worst.reason ? `delayed by ${pulse.worst.reason}` : `most delayed${pulse.worst.next ? ` · near ${pulse.worst.next}` : ""}`}
                       </span>
                     </span>
                     <span className="shrink-0 text-xs font-semibold tabular-nums text-rose-400">
@@ -164,6 +164,23 @@ export function RailPulse({
                     </span>
                   </button>
                 )}
+              </div>
+            )}
+
+            {/* Why trains are late — top causes across the network right now */}
+            {pulse.reasons && pulse.reasons.length > 0 && (
+              <div>
+                <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                  Why trains are late
+                </div>
+                <div className="space-y-0.5">
+                  {pulse.reasons.map((r) => (
+                    <div key={r.reason} className="flex items-center gap-2 text-xs">
+                      <span className="min-w-0 flex-1 truncate capitalize text-foreground/85">{r.reason}</span>
+                      <span className="shrink-0 tabular-nums text-muted-foreground">{r.count}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 

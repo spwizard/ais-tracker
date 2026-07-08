@@ -17,7 +17,9 @@ export interface TrainExtreme {
   lon: number;
   delay_min?: number; // on `worst`
   mph?: number; // on `fastest`
+  reason?: string | null; // on `worst`
 }
+export interface DelayReason { reason: string; count: number; }
 export interface RailPulse {
   total: number;
   on_time_pct: number | null;
@@ -30,6 +32,7 @@ export interface RailPulse {
   history?: number[];
   worst?: TrainExtreme | null;
   fastest?: TrainExtreme | null;
+  reasons?: DelayReason[];
 }
 
 /** Live "State of the Railway" aggregate — refreshes while the panel is open. */

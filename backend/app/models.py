@@ -172,6 +172,7 @@ class Train(BaseModel):
     bearing: Optional[float] = None  # degrees clockwise from north
     speed_kn: Optional[float] = None  # along-segment speed (client glide)
     delay_min: Optional[float] = None
+    delay_reason: Optional[str] = None  # human cause, from Darwin reason code
     next_name: Optional[str] = None  # next calling point
     stops: list[TrainStop] = []  # full calling pattern
     sim: bool = False

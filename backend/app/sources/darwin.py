@@ -31,6 +31,8 @@ from ..config import Settings
 from ..models import Train, TrainStop
 from ..rail.interpolate import CallingPoint, position_at
 from ..rail.operators import operator_name
+from ..rail.reasons import reason_text
+from ..rail.geometry import snap as rail_snap
 from ..rail.tiplocs import tiploc_map
 from ..store.train import TrainStore
 from .base import Source, log
@@ -162,6 +164,7 @@ class DarwinSource(Source):
             ssd = _attr(ts, "ssd")
             if not rid or not ssd:
                 continue
+            reason_code = _attr(ts, "LateReason", "latereason") or _attr(ts, "CancelReason", "cancelreason")
             locs: list[tuple[str, float, bool]] = []
             late: float | None = None
             late_at: float = 0.0  # time of the location the lateness came from
@@ -215,6 +218,10 @@ class DarwinSource(Source):
                 entry["seen"] = now
                 if late is not None:
                     entry["late"] = late
+                if reason_code is not None:
+                    # LateReason can be a bare code or a {"value": code} dict.
+                    rc = reason_code.get("value") if isinstance(reason_code, dict) else reason_code
+                    entry["reason"] = str(rc)
                 # Merge: newer forecasts replace by TIPLOC, keep route order by time.
                 merged = {t[0]: t for t in entry.get("locs", [])}
                 for l in locs:
@@ -243,6 +250,13 @@ class DarwinSource(Source):
             fix = position_at(points, now)
             if fix is None:
                 continue
+            # Tier-2: pull the straight-line position onto the real rails and
+            # take the local track bearing, so trains follow the route instead
+            # of cutting across country. Falls back to the raw fix off-network.
+            lat, lon, bearing = fix.lat, fix.lon, fix.bearing
+            snapped = rail_snap(fix.lat, fix.lon, fix.bearing)
+            if snapped:
+                lat, lon, bearing = snapped
             late = float(svc.get("late") or 0.0)
             toc, headcode = self._schedules.get(rid, (None, None))
             await self._store.upsert(Train(
@@ -251,11 +265,12 @@ class DarwinSource(Source):
                 operator=operator_name(toc),
                 origin=points[0].name,
                 destination=points[-1].name,
-                lat=fix.lat,
-                lon=fix.lon,
-                bearing=fix.bearing,
+                lat=lat,
+                lon=lon,
+                bearing=bearing,
                 speed_kn=round(fix.speed_kn, 1),
                 delay_min=late,
+                delay_reason=reason_text(svc.get("reason")),
                 next_name=points[min(fix.next_idx, len(points) - 1)].name,
                 stops=[TrainStop(crs=p.crs, name=p.name, lat=p.lat, lon=p.lon, t=p.t) for p in points],
                 sim=False,
