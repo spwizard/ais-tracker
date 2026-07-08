@@ -154,6 +154,21 @@ async def _history_loop(app: FastAPI) -> None:
             log.warning("history sample failed: %s", exc)
 
 
+async def _heli_loop(app: FastAPI) -> None:
+    """Watch rotorcraft for sustained circling → inferred incidents."""
+    detector = app.state.heli_detector
+    if detector is None or app.state.incident_store is None or app.state.air_store is None:
+        return
+    while True:
+        await asyncio.sleep(10)
+        try:
+            aircraft = await app.state.air_store.snapshot()
+            incs = detector.update(aircraft, time.time())
+            await app.state.incident_store.replace_source("heli", incs)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("heli detection failed: %s", exc)
+
+
 async def _risk_loop(app: FastAPI) -> None:
     """Periodic behavioral risk detection (gated by the risk_engine flag)."""
     interval = app.state.settings.risk_eval_sec
@@ -230,6 +245,10 @@ async def lifespan(app: FastAPI):
     # Incident spine (Argus): TfL road disruptions now, more eyes later.
     incident_store = IncidentStore() if settings.enable_incidents else None
     app.state.incident_store = incident_store
+    from .incidents.helicopter import HelicopterDetector
+    app.state.heli_detector = (
+        HelicopterDetector() if (incident_store is not None and settings.enable_air) else None
+    )
     # Aircraft enrichment (registration / operator / route / photo) via adsbdb.
     app.state.air_enricher = AircraftEnricher() if settings.enable_air else None
     # Land domain: London traffic cameras (TfL JamCams), lazily fetched + cached.
@@ -392,6 +411,7 @@ async def lifespan(app: FastAPI):
     sweeper = asyncio.create_task(_stale_sweeper(app), name="stale-sweeper")
     geofence_task = asyncio.create_task(_geofence_loop(app), name="geofence-eval")
     risk_task = asyncio.create_task(_risk_loop(app), name="risk-eval")
+    heli_task = asyncio.create_task(_heli_loop(app), name="heli-detect")
     density_task = asyncio.create_task(_density_loop(app), name="density-sample")
     rate_task = asyncio.create_task(_rate_loop(app), name="source-rate")
     history_task = asyncio.create_task(_history_loop(app), name="history-sample")
@@ -418,6 +438,7 @@ async def lifespan(app: FastAPI):
         sweeper.cancel()
         geofence_task.cancel()
         risk_task.cancel()
+        heli_task.cancel()
         density_task.cancel()
         rate_task.cancel()
         history_task.cancel()

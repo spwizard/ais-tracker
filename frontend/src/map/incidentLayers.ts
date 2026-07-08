@@ -21,6 +21,7 @@ const GLYPH: Record<string, string> = {
   delay: "◷",
   works: "⚒",
   event: "◆",
+  aerial: "✚",
   other: "•",
 };
 
