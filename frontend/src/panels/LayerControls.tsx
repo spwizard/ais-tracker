@@ -19,6 +19,7 @@ import {
   TramFront,
   Activity,
   ChevronRight,
+  Landmark,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
@@ -53,6 +54,7 @@ interface LayerControlsProps {
   onOpenRailPulse?: () => void;
   showHotspots?: boolean;
   onToggleHotspots?: () => void;
+  onOpenLondon?: () => void;
   busAvailable: boolean;
   trainAvailable: boolean;
   tubeAvailable: boolean;
@@ -168,6 +170,7 @@ export function LayerControls({
   onOpenRailPulse,
   showHotspots,
   onToggleHotspots,
+  onOpenLondon,
   busAvailable,
   trainAvailable,
   tubeAvailable,
@@ -271,6 +274,15 @@ export function LayerControls({
                 <Activity className="h-3.5 w-3.5 text-primary/80" />
                 State of the Railway
                 <ChevronRight className="h-3.5 w-3.5 opacity-40" />
+              </button>
+            )}
+            {onOpenLondon && (tubeAvailable || busAvailable || trainAvailable) && (
+              <button
+                onClick={onOpenLondon}
+                className="mt-0.5 flex w-full items-center gap-2 rounded-md border border-border/60 px-2.5 py-1.5 text-xs text-foreground/80 transition-colors hover:border-primary/40 hover:bg-primary/10"
+              >
+                <Landmark className="h-3.5 w-3.5 text-primary/80" />
+                London transport pulse
               </button>
             )}
             {trainAvailable && showTrain && onToggleHotspots && (

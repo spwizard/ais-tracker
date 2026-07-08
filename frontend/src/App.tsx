@@ -28,6 +28,8 @@ import { useRailNetwork } from "@/hooks/useRailNetwork";
 import { useStationBoard } from "@/hooks/useStationBoard";
 import { useRailPulse } from "@/hooks/useRailPulse";
 import { useDelayHotspots, type Hotspot } from "@/hooks/useDelayHotspots";
+import { useLondonPulse } from "@/hooks/useLondonPulse";
+import { LondonPulse } from "@/panels/LondonPulse";
 import { useTubeNetwork } from "@/hooks/useTubeNetwork";
 import { useCameraWall } from "@/hooks/useCameraWall";
 import { nearbyCameras, nextCameraAhead } from "@/lib/nearbyCameras";
@@ -115,6 +117,7 @@ export default function App() {
   const railPulse = useRailPulse(panels.railpulse.open);
   const [showHotspots, setShowHotspots] = useState(false);
   const delayHotspots = useDelayHotspots(showTrain && showHotspots);
+  const londonPulse = useLondonPulse(panels.londonpulse.open);
   const [showTube, setShowTube] = useState(false); // London Underground layer
   const tubeAvailable = useFlag("tube");
   const tubeNetwork = useTubeNetwork(showTube);
@@ -963,6 +966,7 @@ export default function App() {
             train: panels.train.open,
             station: panels.station.open,
             railpulse: panels.railpulse.open,
+            londonpulse: panels.londonpulse.open,
             zones: panels.zones.open,
             analyst: panels.analyst.open,
           }}
@@ -1055,6 +1059,10 @@ export default function App() {
             }}
             showHotspots={showHotspots}
             onToggleHotspots={() => setShowHotspots((v) => !v)}
+            onOpenLondon={() => {
+              if (panels.londonpulse.open) setOpen("londonpulse", false);
+              else { setOpen("londonpulse", true); autoPlace("londonpulse"); focus("londonpulse"); }
+            }}
             busAvailable={busAvailable}
             showCameras={showCameras}
             onToggleCameras={setShowCameras}
@@ -1148,6 +1156,9 @@ export default function App() {
               if (t) selectTrain(t);
             }}
           />
+        )}
+        {panels.londonpulse.open && (
+          <LondonPulse chrome={chromeFor("londonpulse")} pulse={londonPulse} />
         )}
         {panels.railpulse.open && (
           <RailPulse

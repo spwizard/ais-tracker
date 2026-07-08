@@ -549,6 +549,53 @@ async def _pulse_narrative(pulse: dict) -> str | None:
     return st.pulse_narrative["text"]
 
 
+# Greater-London bbox (W, S, E, N) for cross-modal London stats.
+_LONDON_BBOX = (-0.53, 51.28, 0.34, 51.70)
+
+
+@app.get("/api/london/pulse")
+async def london_pulse():
+    """One live cross-modal read on London transport: tube + rail + bus fused.
+    Nobody else tracks all three live at once."""
+    from .rail.pulse import compute_pulse
+
+    w, s2, e, n = _LONDON_BBOX
+    out: dict = {"tube": None, "rail": None, "bus": None, "health": None}
+
+    # Tube: line status + trains on the move.
+    if app.state.tube_network is not None and app.state.tube_store is not None:
+        lines = await app.state.tube_network.lines()
+        good = sum(1 for g in lines.values() if g.severity >= 10)
+        tubes = await app.state.tube_store.snapshot()
+        moving = sum(1 for t in tubes if (t.speed_kn or 0) > 0)
+        disrupted = [g.name for g in lines.values() if g.severity < 10]
+        out["tube"] = {"trains": len(tubes), "moving": moving,
+                       "lines_good": good, "lines_total": len(lines),
+                       "disrupted": disrupted[:6]}
+
+    # Rail: services whose current position sits inside the London box.
+    if app.state.train_store is not None:
+        allt = await app.state.train_store.snapshot()
+        lond = [t for t in allt if t.lat is not None and w <= t.lon <= e and s2 <= t.lat <= n]
+        rp = compute_pulse(lond)
+        out["rail"] = {"count": rp["total"], "on_time_pct": rp["on_time_pct"], "late": rp["late"]}
+
+    # Bus: fleet on the road.
+    if app.state.bus_store is not None:
+        out["bus"] = {"count": await app.state.bus_store.count()}
+
+    # Blended health: mean of the punctuality-like signals we actually have
+    # (tube good-service %, London rail on-time %). Buses have no punctuality,
+    # so they count as presence, not health.
+    signals = []
+    if out["tube"] and out["tube"]["lines_total"]:
+        signals.append(100.0 * out["tube"]["lines_good"] / out["tube"]["lines_total"])
+    if out["rail"] and out["rail"]["on_time_pct"] is not None and out["rail"]["count"] >= 3:
+        signals.append(out["rail"]["on_time_pct"])
+    out["health"] = round(sum(signals) / len(signals)) if signals else None
+    return out
+
+
 @app.get("/api/rail/hotspots")
 async def rail_hotspots():
     """Live delay hotspots: heat points + the top clusters, worst first."""
