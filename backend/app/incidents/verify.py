@@ -42,7 +42,9 @@ class IncidentVerifier:
         self._cameras = cameras   # CameraCatalog
 
     def _due(self, inc: Incident, now: float) -> bool:
-        if inc.confidence != "inferred":
+        # Official feeds are authoritative; everything else (inferred, and news
+        # "reported") is a claim a camera can confirm or clear.
+        if inc.confidence == "official":
             return False
         return inc.verified_at == 0.0 or (now - inc.verified_at) > REVERIFY_SEC
 

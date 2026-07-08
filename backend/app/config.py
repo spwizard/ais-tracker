@@ -91,6 +91,8 @@ class Settings(BaseSettings):
     # distinguish a genuine blockage from baseline bus-corridor congestion
     # without scheduled-route (diversion) data. Kept for when that lands.
     enable_bus_swarm: bool = Field(default=False, alias="ENABLE_BUS_SWARM")
+    # News RSS eye — London incidents from news outlets (needs the Anthropic key).
+    enable_news: bool = Field(default=True, alias="ENABLE_NEWS")
 
     # --- Land: London Underground (TfL — free, keyless; app_key raises limits) --
     enable_tube: bool = Field(default=True, alias="ENABLE_TUBE")
