@@ -37,6 +37,8 @@ import { buildCameraLayers } from "./cameraLayers";
 import { buildBusLayers } from "./busLayers";
 import { buildTrainLayers } from "./trainLayers";
 import { buildTubeLayers, tubeColor } from "./tubeLayers";
+import { buildHotspotLayers } from "./hotspotLayers";
+import type { HeatPoint, Hotspot } from "@/hooks/useDelayHotspots";
 import { ScatterplotLayer, TextLayer } from "@deck.gl/layers";
 import { buildReplayLayers, type TrailMode, type ColorMode } from "./replayLayers";
 import { advanceClock } from "./replayMath";
@@ -150,6 +152,9 @@ interface MapViewProps {
   stations: RailStation[];
   railNetwork: unknown | null;
   showTrain: boolean;
+  delayHotspots: { points: HeatPoint[]; hotspots: Hotspot[] };
+  showHotspots: boolean;
+  onHotspotClick: (h: Hotspot) => void;
   onSelectTrain: (t: TrackedTrain | null) => void;
   selectedTrainId: string | null;
   onSelectStation: (s: RailStation) => void;
@@ -233,6 +238,9 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
     stations,
     railNetwork,
     showTrain,
+    delayHotspots,
+    showHotspots,
+    onHotspotClick,
     onSelectTrain,
     selectedTrainId,
     onSelectStation,
@@ -542,6 +550,15 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
             selectedId: selectedTrainId,
             onClick: onSelectTrain,
             onStationClick: onSelectStation,
+            hotspotsMode: showHotspots,
+          })
+        : []),
+      // Delay hotspots — where lateness is concentrating right now.
+      ...(showHotspots
+        ? buildHotspotLayers({
+            points: delayHotspots.points,
+            hotspots: delayHotspots.hotspots,
+            onClick: onHotspotClick,
           })
         : []),
       // London Underground — the network as light, once London fills the view.

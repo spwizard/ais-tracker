@@ -10,6 +10,7 @@ export type PanelId =
   | "bus"
   | "train"
   | "station"
+  | "railpulse"
   | "zones"
   | "analyst";
 
@@ -23,6 +24,7 @@ export const PANEL_IDS: PanelId[] = [
   "bus",
   "train",
   "station",
+  "railpulse",
   "zones",
   "analyst",
 ];
@@ -38,6 +40,7 @@ export const PANEL_W: Record<PanelId, number> = {
   bus: 340,
   train: 340,
   station: 340,
+  railpulse: 340,
   zones: 288,
   analyst: 380,
 };
@@ -53,6 +56,7 @@ export const PANEL_EST_H: Record<PanelId, number> = {
   bus: 320,
   train: 400,
   station: 420,
+  railpulse: 420,
   zones: 360,
   analyst: 540,
 };
@@ -123,6 +127,11 @@ function defaults(): PanelMap {
     station: {
       open: false,
       x: vw - MARGIN - PANEL_W.station,
+      y: MARGIN + PANEL_EST_H.stats + GAP,
+    },
+    railpulse: {
+      open: false,
+      x: vw - MARGIN - PANEL_W.railpulse,
       y: MARGIN + PANEL_EST_H.stats + GAP,
     },
     zones: {

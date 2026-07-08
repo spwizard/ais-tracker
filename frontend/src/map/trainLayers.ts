@@ -5,16 +5,19 @@
  * zoom — that's the whole point of a rail picture.
  */
 import { GeoJsonLayer, IconLayer, PathLayer, ScatterplotLayer, TextLayer } from "@deck.gl/layers";
+import { CollisionFilterExtension } from "@deck.gl/extensions";
 import type { RailStation, TrackedTrain } from "@/types";
 import { deadReckon, DR_SCRATCH } from "./layers";
 import { getTrainIconAtlas, TRAIN_ICON_MAPPING } from "./trainIcons";
 import { getStationIconAtlas, STATION_ICON_MAPPING } from "./stationIcons";
 
 export const TRAIN_MIN_ZOOM = 5;
-// Stations fade in as you zoom: 2,600 dots are texture at national zoom,
-// context at regional zoom, and labelled landmarks up close.
+// Stations fade in as you zoom: 2,600 badges are texture at national zoom,
+// context at regional zoom, and labelled landmarks up close. Both the badges
+// and the labels are collision-filtered so central London reads cleanly
+// instead of becoming a wall of overlapping arrows and text.
 const STATION_DOT_ZOOM = 6.5;
-const STATION_LABEL_ZOOM = 9.5;
+const STATION_LABEL_ZOOM = 11; // labels only once a borough fills the view
 
 const ON_TIME: [number, number, number] = [52, 211, 153]; // emerald
 const LATE: [number, number, number] = [251, 191, 36]; // amber (<5 min)
@@ -37,16 +40,20 @@ export interface TrainLayerOptions {
   selectedId: string | null;
   onClick: (t: TrackedTrain | null) => void;
   onStationClick: (s: RailStation) => void;
+  // Delay-hotspot mode: draw only the network as faint context and let the
+  // heat/clusters read cleanly — trains, badges and labels are suppressed.
+  hotspotsMode?: boolean;
 }
 
 export function buildTrainLayers(opts: TrainLayerOptions) {
-  const { trains, stations, railNetwork, currentTime, zoom, selectedId, onClick, onStationClick } = opts;
+  const { trains, stations, railNetwork, currentTime, zoom, selectedId, onClick, onStationClick, hotspotsMode } = opts;
   if (zoom < TRAIN_MIN_ZOOM) return [];
 
   const layers: unknown[] = [];
 
   // The actual lines: Network Rail's route geometry as a muted steel web —
-  // context for the trains without competing with the tube's neon.
+  // context for the trains without competing with the tube's neon. In hotspot
+  // mode it's dimmed further so the heat is unmistakably the foreground.
   if (railNetwork) {
     layers.push(
       new GeoJsonLayer({
@@ -54,17 +61,25 @@ export function buildTrainLayers(opts: TrainLayerOptions) {
         data: railNetwork as never,
         stroked: true,
         filled: false,
-        getLineColor: [120, 136, 160, zoom >= 9 ? 110 : 70],
+        getLineColor: hotspotsMode ? [90, 104, 126, 60] : [120, 136, 160, zoom >= 9 ? 110 : 70],
         getLineWidth: 1.4,
         lineWidthUnits: "pixels",
         lineWidthMinPixels: 0.75,
-        updateTriggers: { getLineColor: zoom >= 9 },
+        updateTriggers: { getLineColor: hotspotsMode || zoom >= 9 },
       }),
     );
   }
 
+  // In hotspot mode, stop here — the heatmap layers (added by MapView on top)
+  // are the whole point, and trains/badges/labels would just be noise.
+  if (hotspotsMode) return layers;
+
   // Stations: platform-sign badges from regional zoom, names once close in.
-  // Clicking one opens its live departure board.
+  // Clicking one opens its live departure board. Collision filtering drops
+  // badges that would overlap so dense areas stay legible rather than a
+  // solid mat of red arrows; the badges also stay muted so the live trains
+  // (the data) read as the foreground.
+  const stationClose = zoom >= STATION_LABEL_ZOOM;
   if (stations.length > 0 && zoom >= STATION_DOT_ZOOM) {
     layers.push(
       new IconLayer<RailStation>({
@@ -75,24 +90,29 @@ export function buildTrainLayers(opts: TrainLayerOptions) {
         iconMapping: STATION_ICON_MAPPING,
         getIcon: () => "station",
         getPosition: (d) => [d.lon, d.lat],
-        getSize: zoom >= STATION_LABEL_ZOOM ? 16 : 12,
+        getSize: stationClose ? 15 : 11,
         sizeUnits: "pixels",
-        sizeMinPixels: 9,
-        sizeMaxPixels: 18,
-        // National Rail red — the map convention for the double arrow.
-        getColor: [225, 50, 55, zoom >= STATION_LABEL_ZOOM ? 245 : 175],
+        sizeMinPixels: 8,
+        sizeMaxPixels: 17,
+        // National Rail red — the map convention for the double arrow. Kept
+        // a touch translucent so the coloured trains stand out against it.
+        getColor: [214, 60, 64, stationClose ? 220 : 150],
+        extensions: [new CollisionFilterExtension()],
+        // CollisionFilterExtension injects these props at runtime — TS can't see them.
+        ...({
+          collisionEnabled: true,
+          collisionGroup: "rail-station-badges",
+          collisionTestProps: { sizeScale: 2.2 }, // breathing room per badge
+        } as object),
         onClick: (info) => {
           const st = info.object as RailStation | undefined;
           if (st) onStationClick(st);
         },
-        updateTriggers: {
-          getSize: zoom >= STATION_LABEL_ZOOM,
-          getColor: zoom >= STATION_LABEL_ZOOM,
-        },
+        updateTriggers: { getSize: stationClose, getColor: stationClose },
       }),
     );
   }
-  if (stations.length > 0 && zoom >= STATION_LABEL_ZOOM) {
+  if (stations.length > 0 && stationClose) {
     layers.push(
       new TextLayer<RailStation>({
         id: "rail-station-labels",
@@ -100,8 +120,8 @@ export function buildTrainLayers(opts: TrainLayerOptions) {
         getPosition: (d) => [d.lon, d.lat],
         getText: (d) => d.name,
         getSize: 11,
-        getColor: [203, 213, 225, 235],
-        getPixelOffset: [0, -10],
+        getColor: [206, 216, 228, 240],
+        getPixelOffset: [0, -11],
         fontFamily: "Inter, system-ui, sans-serif",
         fontWeight: 500,
         outlineColor: [10, 16, 26],
@@ -109,6 +129,14 @@ export function buildTrainLayers(opts: TrainLayerOptions) {
         fontSettings: { sdf: true },
         getTextAnchor: "middle",
         getAlignmentBaseline: "bottom",
+        // Hide any label that would overlap another — deck keeps a clean,
+        // non-colliding subset instead of stacking every name.
+        extensions: [new CollisionFilterExtension()],
+        ...({
+          collisionEnabled: true,
+          collisionGroup: "rail-station-labels",
+          getCollisionPriority: (d: RailStation) => -d.name.length, // shorter names win ties
+        } as object),
       }),
     );
   }

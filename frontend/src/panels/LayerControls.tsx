@@ -17,6 +17,8 @@ import {
   type LucideIcon,
   TrainFront,
   TramFront,
+  Activity,
+  ChevronRight,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
@@ -48,6 +50,9 @@ interface LayerControlsProps {
   onToggleBus: (v: boolean) => void;
   onToggleTrain: (v: boolean) => void;
   onToggleTube: (v: boolean) => void;
+  onOpenRailPulse?: () => void;
+  showHotspots?: boolean;
+  onToggleHotspots?: () => void;
   busAvailable: boolean;
   trainAvailable: boolean;
   tubeAvailable: boolean;
@@ -160,6 +165,9 @@ export function LayerControls({
   onToggleBus,
   onToggleTrain,
   onToggleTube,
+  onOpenRailPulse,
+  showHotspots,
+  onToggleHotspots,
   busAvailable,
   trainAvailable,
   tubeAvailable,
@@ -249,10 +257,35 @@ export function LayerControls({
               <Row
                 icon={TrainFront}
                 label="Trains (GB · beta)"
-                hint="Tier-1 rail: positions interpolated between calling points. Prototype runs a simulated feed on real routes."
+                hint="Live GB rail via Darwin. Click a station for its live departure board."
                 checked={showTrain}
                 onChange={onToggleTrain}
               />
+            )}
+            {trainAvailable && showTrain && onOpenRailPulse && (
+              // Indented under the Trains label as its drill-in sub-action.
+              <button
+                onClick={onOpenRailPulse}
+                className="ml-6 flex items-center gap-2 rounded-md px-2 py-1 text-xs text-foreground/75 transition-colors hover:bg-foreground/5 hover:text-foreground"
+              >
+                <Activity className="h-3.5 w-3.5 text-primary/80" />
+                State of the Railway
+                <ChevronRight className="h-3.5 w-3.5 opacity-40" />
+              </button>
+            )}
+            {trainAvailable && showTrain && onToggleHotspots && (
+              <button
+                onClick={onToggleHotspots}
+                className={cn(
+                  "ml-6 flex items-center gap-2 rounded-md px-2 py-1 text-xs transition-colors",
+                  showHotspots
+                    ? "bg-orange-500/15 text-orange-300"
+                    : "text-foreground/75 hover:bg-foreground/5 hover:text-foreground",
+                )}
+              >
+                <Flame className={cn("h-3.5 w-3.5", showHotspots ? "text-orange-400" : "text-orange-400/70")} />
+                Delay hotspots
+              </button>
             )}
             {camerasAvailable && (
               <>

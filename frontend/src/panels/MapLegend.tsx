@@ -72,6 +72,7 @@ export function MapLegend({
   showTrains,
   showBuses,
   showTube,
+  showHotspots,
 }: {
   showWind: boolean;
   windAvailable: boolean;
@@ -87,6 +88,7 @@ export function MapLegend({
   showTrains: boolean;
   showBuses: boolean;
   showTube: boolean;
+  showHotspots: boolean;
 }) {
   const wind = showWind && windAvailable;
   const waves = showWaves && wavesAvailable;
@@ -223,8 +225,24 @@ export function MapLegend({
     );
   }
 
-  // Live GB trains: punctuality colours + the station badge.
-  if (showTrains && !replayMode) {
+  // Delay hotspots: a heat ramp + an explicit "live snapshot" note.
+  if (showHotspots && !replayMode) {
+    sections.push(
+      <Section key="hotspots" label="Delay hotspots">
+        <Ramp
+          gradient={"rgb(70,30,14), rgb(200,70,30), rgb(252,176,64), rgb(255,230,150)"}
+          ticks={["fewer", "more delay"]}
+        />
+        <span className="mt-1 block text-[10px] text-muted-foreground/70">
+          Trains 5+ min late, right now · live
+        </span>
+      </Section>,
+    );
+  }
+
+  // Live GB trains: punctuality colours + the station badge. Hidden while the
+  // hotspot view owns the map.
+  if (showTrains && !showHotspots && !replayMode) {
     sections.push(
       <Section key="trains" label="Trains (live GB rail)">
         <div className="space-y-1">

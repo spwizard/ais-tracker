@@ -219,6 +219,8 @@ async def lifespan(app: FastAPI):
     if train_store is not None:
         await train_store.start()
     app.state.train_store = train_store
+    app.state.pulse_history = __import__("collections").deque(maxlen=60)  # (ts, on_time_pct)
+    app.state.pulse_narrative = {"text": None, "ts": 0.0}
     # Land domain: London Underground (TfL) — inferred live positions.
     tube_store = TubeStore() if settings.enable_tube else None
     app.state.tube_store = tube_store
@@ -516,6 +518,65 @@ async def rail_network():
         path, media_type="application/geo+json",
         headers={"Cache-Control": "public, max-age=86400"},
     )
+
+
+async def _pulse_narrative(pulse: dict) -> str | None:
+    """One-line AI headline for the railway pulse, cached ~10 min. Best-effort."""
+    st = app.state
+    if not st.settings.anthropic_api_key or pulse["total"] == 0:
+        return st.pulse_narrative["text"]
+    if time.time() - st.pulse_narrative["ts"] < 600:
+        return st.pulse_narrative["text"]
+    worst = ", ".join(f"{o['name']} {o['on_time_pct']}% on time" for o in pulse["operators"][:3])
+    prompt = (
+        f"Live GB rail right now: {pulse['total']} services tracked, "
+        f"{pulse['on_time_pct']}% on time, {pulse['late']} running late "
+        f"({pulse['bad']} by 5+ min), average delay {pulse['avg_delay']} min. "
+        f"Worst operators: {worst or 'n/a'}. "
+        "Write ONE calm, factual sentence (max 22 words) summarising the state "
+        "of the railway for an operations dashboard. No preamble."
+    )
+    try:
+        client = anthropic.AsyncAnthropic(api_key=st.settings.anthropic_api_key, max_retries=1)
+        msg = await client.messages.create(
+            model=st.settings.camera_vision_model, max_tokens=80,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = "".join(b.text for b in msg.content if b.type == "text").strip()
+        st.pulse_narrative = {"text": text, "ts": time.time()}
+    except Exception as exc:  # noqa: BLE001
+        log.warning("pulse narrative failed: %s", exc)
+    return st.pulse_narrative["text"]
+
+
+@app.get("/api/rail/hotspots")
+async def rail_hotspots():
+    """Live delay hotspots: heat points + the top clusters, worst first."""
+    if app.state.train_store is None:
+        return {"points": [], "hotspots": []}
+    from .rail.hotspots import compute_hotspots
+
+    return compute_hotspots(await app.state.train_store.snapshot())
+
+
+@app.get("/api/rail/pulse")
+async def rail_pulse():
+    """State of the Railway: live national punctuality + per-operator + trend."""
+    if app.state.train_store is None:
+        return {"total": 0}
+    from .rail.pulse import compute_pulse
+
+    pulse = compute_pulse(await app.state.train_store.snapshot())
+    if pulse["on_time_pct"] is not None:
+        app.state.pulse_history.append((time.time(), pulse["on_time_pct"]))
+    hist = list(app.state.pulse_history)
+    pulse["history"] = [round(p) for _t, p in hist][-30:]
+    trend = 0
+    if len(hist) >= 4:
+        trend = hist[-1][1] - hist[max(0, len(hist) - 12)][1]  # vs ~last 12 samples
+    pulse["trend"] = trend
+    pulse["narrative"] = await _pulse_narrative(pulse)
+    return pulse
 
 
 @app.get("/api/rail/board")

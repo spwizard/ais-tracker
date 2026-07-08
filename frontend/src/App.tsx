@@ -21,10 +21,13 @@ import { CameraWall } from "@/panels/CameraWall";
 import { BusDetail } from "@/panels/BusDetail";
 import { TrainDetail } from "@/panels/TrainDetail";
 import { StationBoard } from "@/panels/StationBoard";
+import { RailPulse } from "@/panels/RailPulse";
 import { useCameras } from "@/hooks/useCameras";
 import { useStations } from "@/hooks/useStations";
 import { useRailNetwork } from "@/hooks/useRailNetwork";
 import { useStationBoard } from "@/hooks/useStationBoard";
+import { useRailPulse } from "@/hooks/useRailPulse";
+import { useDelayHotspots, type Hotspot } from "@/hooks/useDelayHotspots";
 import { useTubeNetwork } from "@/hooks/useTubeNetwork";
 import { useCameraWall } from "@/hooks/useCameraWall";
 import { nearbyCameras, nextCameraAhead } from "@/lib/nearbyCameras";
@@ -109,6 +112,9 @@ export default function App() {
   const railNetwork = useRailNetwork(showTrain);
   const [boardStation, setBoardStation] = useState<string | null>(null);
   const stationBoard = useStationBoard(panels.station.open ? boardStation : null);
+  const railPulse = useRailPulse(panels.railpulse.open);
+  const [showHotspots, setShowHotspots] = useState(false);
+  const delayHotspots = useDelayHotspots(showTrain && showHotspots);
   const [showTube, setShowTube] = useState(false); // London Underground layer
   const tubeAvailable = useFlag("tube");
   const tubeNetwork = useTubeNetwork(showTube);
@@ -117,6 +123,7 @@ export default function App() {
   const [wallBusFollow, setWallBusFollow] = useState<string | null>(null); // wall tracks this bus
   const [wallContext, setWallContext] = useState<string | null>(null); // wall shows cams near an alert
 
+  useEffect(() => { if (!showTrain) setShowHotspots(false); }, [showTrain]);
   // Only store aircraft/bus trails while their layer is on (memory).
   useEffect(
     () => setTrailGate({ air: showAir, bus: showBus }),
@@ -922,6 +929,9 @@ export default function App() {
         stations={railStations}
         railNetwork={railNetwork}
         showTrain={showTrain}
+        delayHotspots={delayHotspots}
+        showHotspots={showHotspots}
+        onHotspotClick={(h: Hotspot) => mapRef.current?.flyTo({ longitude: h.lon, latitude: h.lat, zoom: 10 })}
         tubeNetwork={tubeNetwork}
         tubeTrains={tubeTrains}
         showTube={showTube}
@@ -952,6 +962,7 @@ export default function App() {
             bus: panels.bus.open,
             train: panels.train.open,
             station: panels.station.open,
+            railpulse: panels.railpulse.open,
             zones: panels.zones.open,
             analyst: panels.analyst.open,
           }}
@@ -1038,6 +1049,12 @@ export default function App() {
             showTube={showTube}
             onToggleTube={setShowTube}
             tubeAvailable={tubeAvailable}
+            onOpenRailPulse={() => {
+              if (panels.railpulse.open) setOpen("railpulse", false);
+              else { setOpen("railpulse", true); autoPlace("railpulse"); focus("railpulse"); }
+            }}
+            showHotspots={showHotspots}
+            onToggleHotspots={() => setShowHotspots((v) => !v)}
             busAvailable={busAvailable}
             showCameras={showCameras}
             onToggleCameras={setShowCameras}
@@ -1127,6 +1144,16 @@ export default function App() {
             stationQuery={boardStation}
             board={stationBoard}
             onSelectService={(id) => {
+              const t = trainsRef.current.get(id);
+              if (t) selectTrain(t);
+            }}
+          />
+        )}
+        {panels.railpulse.open && (
+          <RailPulse
+            chrome={chromeFor("railpulse")}
+            pulse={railPulse}
+            onSelectTrain={(id) => {
               const t = trainsRef.current.get(id);
               if (t) selectTrain(t);
             }}
@@ -1318,6 +1345,7 @@ export default function App() {
           showTrains={showTrain}
           showBuses={showBus}
           showTube={showTube}
+          showHotspots={showHotspots}
         />
 
         {(showWind || showWaves) && (

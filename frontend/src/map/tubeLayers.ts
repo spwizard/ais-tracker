@@ -12,6 +12,7 @@
  *      gliding along the strands via dead reckoning between polls.
  */
 import { IconLayer, PathLayer, ScatterplotLayer, TextLayer } from "@deck.gl/layers";
+import { CollisionFilterExtension } from "@deck.gl/extensions";
 import { PathStyleExtension } from "@deck.gl/extensions";
 import type { TubeLine, TubeStation, TubeTrain } from "@/types";
 import { deadReckon, DR_SCRATCH } from "./layers";
@@ -181,6 +182,13 @@ export function buildTubeLayers(opts: TubeLayerOptions) {
         fontSettings: { sdf: true },
         getTextAnchor: "middle",
         getAlignmentBaseline: "bottom",
+        // Drop labels that would overlap so the network stays readable.
+        extensions: [new CollisionFilterExtension()],
+        ...({
+          collisionEnabled: true,
+          collisionGroup: "tube-station-labels",
+          getCollisionPriority: (d: TubeStation) => d.lines.length, // interchanges win
+        } as object),
       }),
     );
   }
