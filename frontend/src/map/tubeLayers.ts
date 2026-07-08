@@ -52,6 +52,21 @@ const LINE_OFFSET: Record<string, number> = {
   piccadilly: 1.3, // shares the District corridor out west
 };
 
+/** Line id → display name + colour, for the map legend. */
+export const TUBE_LINE_LEGEND: { id: string; name: string; color: RGB }[] = [
+  { id: "bakerloo", name: "Bakerloo", color: LINE_COLORS.bakerloo.core },
+  { id: "central", name: "Central", color: LINE_COLORS.central.core },
+  { id: "circle", name: "Circle", color: LINE_COLORS.circle.core },
+  { id: "district", name: "District", color: LINE_COLORS.district.core },
+  { id: "hammersmith-city", name: "H'smith & City", color: LINE_COLORS["hammersmith-city"].core },
+  { id: "jubilee", name: "Jubilee", color: LINE_COLORS.jubilee.core },
+  { id: "metropolitan", name: "Metropolitan", color: LINE_COLORS.metropolitan.core },
+  { id: "northern", name: "Northern", color: LINE_COLORS.northern.core },
+  { id: "piccadilly", name: "Piccadilly", color: LINE_COLORS.piccadilly.core },
+  { id: "victoria", name: "Victoria", color: LINE_COLORS.victoria.core },
+  { id: "waterloo-city", name: "W'loo & City", color: LINE_COLORS["waterloo-city"].core },
+];
+
 export function tubeColor(lineId: string): RGB {
   return (LINE_COLORS[lineId] ?? FALLBACK).core;
 }

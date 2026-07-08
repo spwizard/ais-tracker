@@ -9,7 +9,8 @@ const EMPTY: SearchResults = {
   events: [],
   locations: [],
   intelligence: [],
-  counts: { vessels: 0, events: 0, locations: 0, intelligence: 0 },
+  places: [],
+  counts: { vessels: 0, events: 0, locations: 0, intelligence: 0, places: 0 },
 };
 
 /** Debounced global search. With `type` set, fetches a deeper slice of one

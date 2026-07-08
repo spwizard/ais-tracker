@@ -831,6 +831,26 @@ export default function App() {
     else if (it.lat != null && it.lon != null)
       mapRef.current?.flyTo({ longitude: it.lon, latitude: it.lat, zoom: 11 });
   };
+  const onSearchPlace = (pl: {
+    kind: "station" | "camera";
+    id: string;
+    name: string;
+    lat: number | null;
+    lon: number | null;
+  }) => {
+    if (pl.lat != null && pl.lon != null)
+      mapRef.current?.flyTo({
+        longitude: pl.lon,
+        latitude: pl.lat,
+        zoom: pl.kind === "station" ? 13 : 15,
+      });
+    if (pl.kind === "station") {
+      selectStation({ name: pl.name });
+    } else {
+      const c = cameras.find((x) => x.id === pl.id);
+      if (c) selectCamera(c);
+    }
+  };
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-background">
@@ -957,6 +977,7 @@ export default function App() {
             onSelectAlert={onSelectAlert}
             onJumpLocation={onSearchLocation}
             onSelectIntel={onSearchIntel}
+            onSelectPlace={onSearchPlace}
             isLive={(m) => m != null && vesselsRef.current.has(m)}
           />
         </IslandDropdown>
@@ -1295,6 +1316,8 @@ export default function App() {
           hasSelection={selectedMmsi != null}
           showVessels={showVessels}
           showTrains={showTrain}
+          showBuses={showBus}
+          showTube={showTube}
         />
 
         {(showWind || showWaves) && (

@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Ship, MapPin, Hexagon, ShieldAlert, Activity, Radio, Clock, ArrowRight } from "lucide-react";
+import { Ship, MapPin, Hexagon, ShieldAlert, Activity, Radio, Clock, ArrowRight, TrainFront, Cctv } from "lucide-react";
 import {
   Command,
   CommandInput,
@@ -11,10 +11,12 @@ import {
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSearch } from "@/hooks/useSearch";
 import { colorHexFor } from "@/lib/shipTypes";
+import { cn } from "@/lib/utils";
 import type {
   Alert,
   SearchCategory,
   SearchIntel,
+  SearchPlace,
   SearchLocation,
   SearchVessel,
 } from "@/types";
@@ -22,6 +24,7 @@ import type {
 type Tab = "all" | SearchCategory;
 const TABS: { key: Tab; label: string }[] = [
   { key: "all", label: "All" },
+  { key: "places", label: "Places" },
   { key: "vessels", label: "Vessels" },
   { key: "events", label: "Events" },
   { key: "intelligence", label: "Intelligence" },
@@ -60,6 +63,7 @@ export interface GlobalSearchProps {
   onSelectAlert: (a: Alert) => void;
   onJumpLocation: (loc: SearchLocation) => void;
   onSelectIntel: (intel: SearchIntel) => void;
+  onSelectPlace: (place: SearchPlace) => void;
   /** Whether an event's vessel is still transmitting. Rows for vessels that
    *  left coverage get a "not live" tag — clicking them zooms to where the
    *  event happened but cannot highlight the vessel. */
@@ -72,6 +76,7 @@ export function GlobalSearchContent({
   onSelectAlert,
   onJumpLocation,
   onSelectIntel,
+  onSelectPlace,
   isLive,
 }: GlobalSearchProps) {
   const [query, setQuery] = useState("");
@@ -88,7 +93,7 @@ export function GlobalSearchContent({
 
   const { counts } = results;
   const totalResults =
-    counts.vessels + counts.events + counts.locations + counts.intelligence;
+    counts.vessels + counts.events + counts.locations + counts.intelligence + counts.places;
   const showGroup = (cat: SearchCategory) => tab === "all" || tab === cat;
 
   const SeeMore = ({ cat, total, shown }: { cat: SearchCategory; total: number; shown: number }) =>
@@ -140,6 +145,14 @@ export function GlobalSearchContent({
           <>
             {!loading && totalResults === 0 && <CommandEmpty>No results for “{query}”.</CommandEmpty>}
 
+            {showGroup("places") && results.places.length > 0 && (
+              <CommandGroup heading="Places">
+                <SeeMore cat="places" total={counts.places} shown={results.places.length} />
+                {results.places.map((p) => (
+                  <PlaceRow key={`${p.kind}-${p.id}`} p={p} q={query} onSelect={() => act(() => onSelectPlace(p))} />
+                ))}
+              </CommandGroup>
+            )}
             {showGroup("vessels") && results.vessels.length > 0 && (
               <CommandGroup heading="Vessels">
                 <SeeMore cat="vessels" total={counts.vessels} shown={results.vessels.length} />
@@ -317,6 +330,27 @@ function IntelRow({
           not live
         </span>
       )}
+    </CommandItem>
+  );
+}
+
+function PlaceRow({ p, q, onSelect }: { p: SearchPlace; q: string; onSelect: () => void }) {
+  const isStation = p.kind === "station";
+  const Icon = isStation ? TrainFront : Cctv;
+  const action = isStation ? "board" : "feed";
+  const offline = p.kind === "camera" && p.available === false;
+  return (
+    <CommandItem value={`p-${p.kind}-${p.id}`} onSelect={onSelect}>
+      <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-foreground/5">
+        <Icon className={cn("h-3.5 w-3.5", isStation ? "text-rose-400" : "text-sky-400")} />
+      </span>
+      <span className="min-w-0 flex-1 truncate">
+        <span className="font-medium"><Highlight text={p.name} q={q} /></span>
+        <span className="text-muted-foreground"> · {p.subtitle}</span>
+      </span>
+      <span className="ml-auto shrink-0 rounded border border-foreground/15 px-1 py-px text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
+        {offline ? "offline" : action}
+      </span>
     </CommandItem>
   );
 }

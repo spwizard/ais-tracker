@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { SHIP_TYPE_GROUPS } from "@/lib/shipTypes";
 import { WIND_SPEED_PALETTE, WAVE_HEIGHT_PALETTE, HEAT_COLOR_RANGE } from "@/map/layers";
 import { SPEED_RAMP, SPEED_MAX_KN, type ColorMode } from "@/map/replayLayers";
+import { TUBE_LINE_LEGEND } from "@/map/tubeLayers";
 
 const MS_TO_KN = 1.94384;
 
@@ -69,6 +70,8 @@ export function MapLegend({
   hasSelection,
   showVessels,
   showTrains,
+  showBuses,
+  showTube,
 }: {
   showWind: boolean;
   windAvailable: boolean;
@@ -82,6 +85,8 @@ export function MapLegend({
   /** Each domain's key only appears while its layer is actually visible. */
   showVessels: boolean;
   showTrains: boolean;
+  showBuses: boolean;
+  showTube: boolean;
 }) {
   const wind = showWind && windAvailable;
   const waves = showWaves && wavesAvailable;
@@ -173,6 +178,47 @@ export function MapLegend({
             </span>
           ))}
         </div>
+      </Section>,
+    );
+  }
+
+  // London buses: operator colours (matches busLayers).
+  if (showBuses && !replayMode) {
+    sections.push(
+      <Section key="buses" label="Buses (London)">
+        <div className="space-y-1">
+          <span className="flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#e22d26]" />
+            <span className="text-[11px] text-foreground/90">TfL bus</span>
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#fbbf24]" />
+            <span className="text-[11px] text-foreground/90">Other operator</span>
+          </span>
+        </div>
+      </Section>,
+    );
+  }
+
+  // Underground: official line colours; dimmed lines are disrupted.
+  if (showTube && !replayMode) {
+    sections.push(
+      <Section key="tube" label="Underground lines">
+        <div className="grid grid-cols-2 gap-x-2 gap-y-1">
+          {TUBE_LINE_LEGEND.map((l) => (
+            <span key={l.id} className="flex items-center gap-1.5">
+              <span
+                className="h-[3px] w-4 shrink-0 rounded-full"
+                style={{ background: `rgb(${l.color[0]},${l.color[1]},${l.color[2]})` }}
+              />
+              <span className="truncate text-[11px] text-foreground/90">{l.name}</span>
+            </span>
+          ))}
+        </div>
+        <span className="mt-1.5 flex items-center gap-1.5">
+          <span className="h-[3px] w-4 shrink-0 rounded-full bg-foreground/25" />
+          <span className="text-[11px] text-foreground/90">Dimmed = disruption</span>
+        </span>
       </Section>,
     );
   }

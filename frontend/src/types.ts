@@ -89,13 +89,26 @@ export interface SearchIntel {
   lon?: number | null;
   ts?: number;
 }
-export type SearchCategory = "vessels" | "events" | "locations" | "intelligence";
+/** A named place you act on: a rail station (→ departure board) or a traffic
+ *  camera (→ live feed). */
+export interface SearchPlace {
+  kind: "station" | "camera";
+  id: string; // CRS for stations, camera id for cameras
+  name: string;
+  subtitle: string;
+  lat: number | null;
+  lon: number | null;
+  available?: boolean;
+}
+
+export type SearchCategory = "vessels" | "events" | "locations" | "intelligence" | "places";
 export interface SearchResults {
   q: string;
   vessels: SearchVessel[];
   events: Alert[];
   locations: SearchLocation[];
   intelligence: SearchIntel[];
+  places: SearchPlace[];
   counts: Record<SearchCategory, number>;
 }
 

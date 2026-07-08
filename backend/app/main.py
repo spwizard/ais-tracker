@@ -910,9 +910,9 @@ async def search(q: str, type: str | None = None, limit: int = 6):
     (for the "All" view + "See more"). Pass `type=<group>` (and a larger `limit`)
     to fetch just one group for its tab."""
     ql = q.strip()
-    counts = {"vessels": 0, "events": 0, "locations": 0, "intelligence": 0}
+    counts = {"vessels": 0, "events": 0, "locations": 0, "intelligence": 0, "places": 0}
     if len(ql) < 2:
-        return {"q": ql, "vessels": [], "events": [], "locations": [], "intelligence": [], "counts": counts}
+        return {"q": ql, "vessels": [], "events": [], "locations": [], "intelligence": [], "places": [], "counts": counts}
 
     want = lambda c: type is None or type == c  # noqa: E731
     cap = max(1, min(limit, 50))
@@ -985,9 +985,50 @@ async def search(q: str, type: str | None = None, limit: int = 6):
         counts["intelligence"] = scount + rcount
         intelligence = (intelligence + risk)[:cap]
 
+    # --- Places (rail stations + traffic cameras — named spots you act on) ---
+    places: list[dict] = []
+    if want("places"):
+        qlow = ql.lower()
+        # Rail stations → open a live departure board. Rank exact/prefix first.
+        if app.state.train_store is not None:
+            from .rail.stations import stations_by_crs
+
+            exact, prefix, sub = [], [], []
+            for st in stations_by_crs().values():
+                nl = st.name.lower()
+                row = {
+                    "kind": "station", "id": st.crs, "name": st.name,
+                    "subtitle": st.crs, "lat": st.lat, "lon": st.lon,
+                }
+                if nl == qlow or st.crs.lower() == qlow:
+                    exact.append(row)
+                elif nl.startswith(qlow):
+                    prefix.append(row)
+                elif qlow in nl:
+                    sub.append(row)
+            station_hits = exact + sorted(prefix, key=lambda r: r["name"]) + sorted(sub, key=lambda r: r["name"])
+        else:
+            station_hits = []
+        # Traffic cameras → open the live feed.
+        camera_hits: list[dict] = []
+        if app.state.cameras is not None:
+            for c in await app.state.cameras.list():
+                name = c.get("name") or ""
+                if qlow in name.lower():
+                    camera_hits.append({
+                        "kind": "camera", "id": c["id"], "name": name,
+                        "subtitle": c.get("view") or "Traffic camera",
+                        "lat": c.get("lat"), "lon": c.get("lon"),
+                        "available": c.get("available", True),
+                    })
+        counts["places"] = len(station_hits) + len(camera_hits)
+        # Interleave so both types are represented in the capped "All" view.
+        places = (station_hits + camera_hits)[:cap]
+
     return {
         "q": ql, "vessels": vessels, "events": events,
-        "locations": locations, "intelligence": intelligence, "counts": counts,
+        "locations": locations, "intelligence": intelligence,
+        "places": places, "counts": counts,
     }
 
 
