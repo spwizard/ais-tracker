@@ -4,7 +4,7 @@
  * Category sets the glyph via an emoji text mark (crash/breakdown/hazard…).
  */
 import { ScatterplotLayer, TextLayer } from "@deck.gl/layers";
-import type { Incident } from "@/types";
+import { incidentTier, type Incident } from "@/types";
 
 export const INCIDENT_MIN_ZOOM = 8;
 
@@ -12,6 +12,13 @@ const SEVERITY_COLOR: Record<string, [number, number, number]> = {
   serious: [244, 63, 94], // rose
   moderate: [251, 146, 60], // orange
   minor: [250, 204, 21], // amber
+};
+
+// A camera-verified or human/news-reported incident is more than a dot on a
+// map — it wears a coloured ring so it reads apart from routine roadworks.
+const RING_COLOR: Record<string, [number, number, number]> = {
+  confirmed: [16, 185, 129], // emerald — a camera saw it
+  reported: [56, 189, 248], // sky — a named source claims it
 };
 
 const GLYPH: Record<string, string> = {
@@ -37,18 +44,49 @@ export function buildIncidentLayers(opts: IncidentLayerOptions) {
   const { incidents, currentTime, zoom, onClick } = opts;
   if (zoom < INCIDENT_MIN_ZOOM || incidents.length === 0) return [];
   const pulse = 0.5 + 0.5 * Math.sin(currentTime * 3);
-  const serious = incidents.filter((i) => i.severity === "serious" && i.verification !== "cleared");
+  const tierOf = (i: Incident) => incidentTier(i);
+  // Draw the eye to what matters: serious incidents, and any human-reported or
+  // camera-confirmed one regardless of severity.
+  const notable = incidents.filter(
+    (i) => i.verification !== "cleared" &&
+      (i.severity === "serious" || tierOf(i) === "reported" || tierOf(i) === "confirmed"),
+  );
+  const ringed = incidents.filter(
+    (i) => i.verification !== "cleared" && RING_COLOR[tierOf(i)] !== undefined,
+  );
 
   return [
-    // Pulsing halo under serious incidents.
+    // Pulsing halo under everything notable — colour it by credibility so a
+    // reported/confirmed incident glows in its own hue, not just severity red.
     new ScatterplotLayer<Incident>({
       id: "incident-halo",
-      data: serious,
+      data: notable,
       getPosition: (d) => [d.lon, d.lat],
       getRadius: 10 + pulse * 8,
       radiusUnits: "pixels",
-      getFillColor: [244, 63, 94, 60],
-      updateTriggers: { getRadius: currentTime },
+      getFillColor: (d) => {
+        const c = RING_COLOR[tierOf(d)] ?? SEVERITY_COLOR.serious;
+        return [c[0], c[1], c[2], 60];
+      },
+      updateTriggers: { getRadius: currentTime, getFillColor: notable.length },
+    }),
+    // Crisp credibility ring on reported/confirmed pins — the visual signature
+    // that separates a witnessed/verified incident from a routine roadwork.
+    new ScatterplotLayer<Incident>({
+      id: "incident-rings",
+      data: ringed,
+      getPosition: (d) => [d.lon, d.lat],
+      getRadius: (d) => (d.severity === "serious" ? 12 : 10),
+      radiusUnits: "pixels",
+      radiusMinPixels: 8,
+      stroked: true,
+      filled: false,
+      getLineColor: (d) => {
+        const c = RING_COLOR[tierOf(d)] ?? SEVERITY_COLOR.serious;
+        return [c[0], c[1], c[2], 230];
+      },
+      lineWidthMinPixels: 2,
+      updateTriggers: { getLineColor: ringed.length },
     }),
     // The pin.
     new ScatterplotLayer<Incident>({

@@ -1127,7 +1127,10 @@ export default function App() {
             onToggleTube={toggleLondonLayer(setShowTube)}
             tubeAvailable={tubeAvailable}
             showIncidents={showIncidents}
-            onToggleIncidents={toggleLondonLayer(setShowIncidents)}
+            onToggleIncidents={(v) => {
+              toggleLondonLayer(setShowIncidents)(v);
+              setOpen("incidents", v); // pins + the rail open/close together
+            }}
             incidentsAvailable={incidentsAvailable}
             onEnterArgusLondon={incidentsAvailable ? enterArgusLondon : undefined}
             onOpenRailPulse={() => {

@@ -384,11 +384,12 @@ export interface Incident {
 }
 
 /** Credibility tier derived from source confidence + camera verification. */
-export type IncidentTier = "confirmed" | "reported" | "suspected" | "cleared";
+export type IncidentTier = "confirmed" | "reported" | "official" | "suspected" | "cleared";
 export function incidentTier(i: Incident): IncidentTier {
   if (i.verification === "cleared") return "cleared";
   if (i.verification === "confirmed") return "confirmed";
-  if (i.confidence === "official") return "reported";
+  if (i.confidence === "reported") return "reported"; // a named human/news source claims it
+  if (i.confidence === "official") return "official"; // authoritative feed (TfL) — routine
   return "suspected"; // inferred, not (yet) camera-confirmed
 }
 
