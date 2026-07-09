@@ -60,6 +60,7 @@ from .sources.rail_sim import SimRailSource
 from .sources.tube import TubeSource
 from .sources.tfl_road import TflRoadSource
 from .incidents.news import NewsSource
+from .incidents.social import SocialSource
 from .store import create_store
 from .store.aircraft import AircraftStore
 from .store.bus import BusStore
@@ -324,6 +325,8 @@ async def lifespan(app: FastAPI):
         sources.append(app.state.tfl_road)
         if settings.enable_news and settings.anthropic_api_key:
             sources.append(NewsSource(incident_store, settings))
+        if settings.enable_social and settings.anthropic_api_key:
+            sources.append(SocialSource(incident_store, settings))
     for src in sources:
         src.start()
     app.state.sources = sources

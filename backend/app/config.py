@@ -93,6 +93,11 @@ class Settings(BaseSettings):
     enable_bus_swarm: bool = Field(default=False, alias="ENABLE_BUS_SWARM")
     # News RSS eye — London incidents from news outlets (needs the Anthropic key).
     enable_news: bool = Field(default=True, alias="ENABLE_NEWS")
+    # Bluesky social eye — London incidents from posts. Needs a free app password
+    # (Bluesky Settings → App Passwords); idles cleanly if the creds are unset.
+    enable_social: bool = Field(default=True, alias="ENABLE_SOCIAL")
+    bluesky_handle: str = Field(default="", alias="BLUESKY_HANDLE")
+    bluesky_app_password: str = Field(default="", alias="BLUESKY_APP_PASSWORD")
 
     # --- Land: London Underground (TfL — free, keyless; app_key raises limits) --
     enable_tube: bool = Field(default=True, alias="ENABLE_TUBE")
