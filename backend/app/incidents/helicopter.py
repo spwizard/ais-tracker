@@ -22,6 +22,16 @@ RADIUS_MAX_M = 3000.0    # must stay within this of its orbit centre
 MIN_CIRCLE_SEC = 90.0    # sustained this long before we call it
 GS_RANGE = (20.0, 150.0) # a moving orbit, not a hover or transit
 
+# Argus London is a London story, but the ADS-B feed spans UK + Norway + Baltic.
+# Bound the eye to Greater London (+ approaches) so a helicopter orbiting Bergen
+# never surfaces as a London incident. (W, S, E, N)
+LONDON_BBOX = (-0.62, 51.25, 0.40, 51.73)
+
+
+def _in_london(lat: float, lon: float) -> bool:
+    w, s, e, n = LONDON_BBOX
+    return w <= lon <= e and s <= lat <= n
+
 
 def _dist_m(lat1, lon1, lat2, lon2) -> float:
     dlat = math.radians(lat2 - lat1)
@@ -61,6 +71,8 @@ class HelicopterDetector:
         for a in aircraft:
             if a.category != "A7" or a.lat is None or a.lon is None:
                 continue
+            if not _in_london(a.lat, a.lon):
+                continue  # only London orbits are Argus London incidents
             seen.add(a.hex)
             h = self._hist.setdefault(a.hex, deque())
             h.append((now, a.lat, a.lon, a.track))
