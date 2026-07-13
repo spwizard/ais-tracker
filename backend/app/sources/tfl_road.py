@@ -70,6 +70,11 @@ def parse_disruptions(items: list[dict], now: float) -> list[Incident]:
             ts = time.mktime(time.strptime(started, "%Y-%m-%dT%H:%M:%SZ")) if started else now
         except (ValueError, TypeError):
             ts = now
+        # TfL's `url` is a relative API self-link (/Road/All/Disruption/TIMS-…),
+        # not a public page — it 404s against our own host. Keep it only if it's
+        # ever an absolute link, otherwise drop it so no broken "Source" shows.
+        raw_url = (d.get("url") or "").strip()
+        url = raw_url if raw_url.startswith("http") else None
         out.append(Incident(
             id=f"tfl-road:{did}",
             source="tfl-road",
@@ -81,7 +86,7 @@ def parse_disruptions(items: list[dict], now: float) -> list[Incident]:
             location=loc or None,
             lat=pt[0],
             lon=pt[1],
-            url=d.get("url"),
+            url=url,
             ts=ts,
             updated=now,
         ))
