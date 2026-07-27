@@ -294,6 +294,52 @@ export interface Aircraft {
   ts: number; // last update, epoch seconds
 }
 
+/** One satellite wildfire detection (NASA FIRMS). A fixed hot pixel from a
+ *  single overpass — no movement. Keyed by `id`. */
+export interface FireDetection {
+  id: string;
+  lat: number;
+  lon: number;
+  frp: number; // fire radiative power, megawatts — intensity
+  brightness: number | null; // brightness temperature, Kelvin
+  confidence: "low" | "nominal" | "high";
+  satellite: string; // e.g. "NOAA-20", "S-NPP", "Aqua"
+  instrument: string; // "VIIRS" | "MODIS"
+  daynight: "D" | "N";
+  acq: number; // acquisition time, epoch seconds (UTC)
+  ts: number;
+}
+
+/** A clustered wildfire — many detections grouped into one named fire, with
+ *  growth and a wind-driven spread forecast. From `/api/fire/complexes`. */
+export interface FireComplex {
+  id: string;
+  lat: number;
+  lon: number;
+  total_frp: number; // summed radiative power (MW) — overall intensity
+  peak_frp: number; // hottest single pixel
+  count: number;
+  count_24h: number;
+  count_prev: number;
+  growth: number; // count_24h / max(count_prev, 1)
+  status: "spreading" | "active" | "easing" | "cooling";
+  kind: "wildfire" | "industrial"; // industrial = persistent fixed thermal source
+  span_km: number;
+  high_conf: number;
+  first_seen: number;
+  last_seen: number;
+  last_satellite: string;
+  place: string | null;
+  region: string | null;
+  country: string | null;
+  flag: string | null; // country flag emoji
+  wind_from: number | null; // bearing wind blows FROM
+  wind_kmh: number | null;
+  spread_deg: number | null; // bearing the fire is pushed TOWARD
+  spread_compass: string | null;
+  downwind_place: string | null;
+}
+
 /** Aircraft carrying a client-side dead-reckoning trail (rendered record). */
 export interface TrackedAircraft extends Aircraft {
   trail: [number, number, number][]; // [lon, lat, ts]
@@ -512,6 +558,8 @@ export type ServerFrame =
   | { type: "tube_update"; trains: TubeTrain[]; removed: string[] }
   | { type: "incident_snapshot"; incidents: Incident[] }
   | { type: "incident_update"; incidents: Incident[]; removed: string[] }
+  | { type: "fire_snapshot"; fires: FireDetection[] }
+  | { type: "fire_update"; fires: FireDetection[]; removed: string[] }
   | GeofenceEvent
   | RiskEvent
   | { type: "flagged"; mmsis: number[] }

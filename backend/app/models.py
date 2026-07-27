@@ -108,6 +108,64 @@ class Aircraft(BaseModel):
     ts: float = 0.0  # last update (epoch seconds)
 
 
+class FireDetection(BaseModel):
+    """One satellite thermal-anomaly detection — the fire-domain analogue of a
+    point observation. Sourced from NASA FIRMS (VIIRS 375 m / MODIS 1 km).
+
+    A detection is a single hot pixel from one satellite overpass; it never
+    moves, so there's no dead-reckoning. Keyed by a stable hash of position +
+    acquisition time + satellite, so re-polling the same window is idempotent.
+    """
+
+    id: str  # hash(lat, lon, acq, satellite) — stable key
+    lat: float
+    lon: float
+    frp: float  # fire radiative power, megawatts — the intensity signal
+    brightness: Optional[float] = None  # brightness temperature, Kelvin
+    confidence: str = "nominal"  # "low" | "nominal" | "high" (normalised)
+    satellite: str = ""  # human label, e.g. "NOAA-20", "S-NPP", "Aqua"
+    instrument: str = ""  # "VIIRS" | "MODIS"
+    daynight: str = "D"  # "D" daytime pass / "N" nighttime pass
+
+    acq: float = 0.0  # acquisition time (epoch seconds, UTC)
+    ts: float = 0.0  # same as acq — the field the broadcaster diffs on
+
+
+class FireComplex(BaseModel):
+    """A clustered wildfire — many detections grouped into one named fire, with
+    growth over the last 24 h and a wind-driven spread forecast. This is the
+    unit people care about ("the fire near Artana"), derived from the raw pixels.
+    """
+
+    id: str  # stable-ish hash of the cluster centroid
+    lat: float  # FRP-weighted centroid
+    lon: float
+    total_frp: float  # summed radiative power — overall intensity
+    peak_frp: float  # hottest single pixel
+    count: int  # detections in the cluster
+    count_24h: int  # detections in the last 24 h
+    count_prev: int  # detections in the prior 24 h (for growth)
+    growth: float  # count_24h / max(count_prev, 1) — >1 growing, <1 cooling
+    status: str  # "spreading" | "active" | "easing" | "cooling"
+    kind: str = "wildfire"  # "wildfire" | "industrial" (persistent point source)
+    span_km: float  # rough extent (bbox diagonal)
+    high_conf: int  # count of high-confidence detections
+    first_seen: float  # earliest acquisition (epoch)
+    last_seen: float  # latest acquisition (epoch)
+    last_satellite: str = ""  # satellite of the most recent pass
+
+    # Enriched (reverse-geocode + wind) — populated best-effort, may be null.
+    place: Optional[str] = None  # nearest settlement to the fire
+    region: Optional[str] = None  # admin region / state
+    country: Optional[str] = None
+    flag: Optional[str] = None  # country flag emoji
+    wind_from: Optional[float] = None  # bearing wind blows FROM, degrees
+    wind_kmh: Optional[float] = None  # wind speed, km/h
+    spread_deg: Optional[float] = None  # bearing the fire is pushed TOWARD
+    spread_compass: Optional[str] = None  # e.g. "NE"
+    downwind_place: Optional[str] = None  # settlement in the spread path
+
+
 class Bus(BaseModel):
     """Full current state for one bus — the land-domain analogue of ``Vessel``.
 

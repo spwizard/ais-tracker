@@ -37,6 +37,10 @@ def _valid_position(lat: float | None, lon: float | None) -> bool:
 
 class Source(ABC):
     name: str = "source"
+    # Seconds of silence before an open feed reads as "stale". Streaming sources
+    # keep the default; long-cadence pollers (e.g. FIRMS every 15 min) override
+    # it so a healthy feed doesn't sit amber between polls.
+    stale_after: float = STALE_AFTER_SEC
 
     def __init__(self, store: VesselStore) -> None:
         self._store = store
@@ -53,7 +57,7 @@ class Source(ABC):
     @property
     def receiving(self) -> bool:
         """Connected AND actually delivering data (not a silent/zombie socket)."""
-        return self.connected and (time.time() - self.last_msg_ts) < STALE_AFTER_SEC
+        return self.connected and (time.time() - self.last_msg_ts) < self.stale_after
 
     def sample_rate(self, now: float) -> None:
         """Refresh msg_rate from the message delta since the last sample. Called

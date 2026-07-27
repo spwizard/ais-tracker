@@ -25,6 +25,8 @@ import type {
   TubeStation,
   TubeTrain,
   Incident,
+  FireDetection,
+  FireComplex,
   Camera,
   DensityPoint,
   WeatherMeta,
@@ -40,6 +42,7 @@ import { buildTrainLayers } from "./trainLayers";
 import { buildTubeLayers, tubeColor } from "./tubeLayers";
 import { buildHotspotLayers } from "./hotspotLayers";
 import { buildIncidentLayers } from "./incidentLayers";
+import { buildFireLayers } from "./fireLayers";
 import type { HeatPoint, Hotspot } from "@/hooks/useDelayHotspots";
 import { ScatterplotLayer, TextLayer } from "@deck.gl/layers";
 import { buildReplayLayers, type TrailMode, type ColorMode } from "./replayLayers";
@@ -168,6 +171,14 @@ interface MapViewProps {
   showIncidents: boolean;
   onSelectIncident: (i: Incident | null) => void;
   onSelectTubeStation: (s: TubeStation) => void;
+  // Wildfires (NASA FIRMS) layer.
+  fires: FireDetection[];
+  showFire: boolean;
+  onSelectFire: (f: FireDetection | null) => void;
+  // Suspected fixed industrial heat sources — slate markers so they never read
+  // as wildfires. Clicking one opens its labelled detail.
+  industrialFires: FireComplex[];
+  onSelectFireComplex: (c: FireComplex | null) => void;
   // The camera the selected bus is heading toward next — pulse a ring on it.
   nextCameraPos: [number, number] | null;
 }
@@ -257,6 +268,11 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
     showIncidents,
     onSelectIncident,
     onSelectTubeStation,
+    fires,
+    showFire,
+    onSelectFire,
+    industrialFires,
+    onSelectFireComplex,
     nextCameraPos,
   } = props;
 
@@ -591,6 +607,17 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
             onClick: onSelectIncident,
           })
         : []),
+      // Wildfires (NASA FIRMS) — a glowing ember field, weighted by intensity.
+      ...(showFire
+        ? buildFireLayers({
+            fires,
+            currentTime,
+            zoom,
+            onClick: onSelectFire,
+            industrial: industrialFires,
+            onSelectComplex: onSelectFireComplex,
+          })
+        : []),
       // Pulsing ring on the camera the selected bus is heading toward next.
       ...(nextCameraPos ? buildNextCameraRing(nextCameraPos, currentTime) : []),
     ],
@@ -637,6 +664,11 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
       showIncidents,
       onSelectIncident,
       onSelectTubeStation,
+      fires,
+      showFire,
+      onSelectFire,
+      industrialFires,
+      onSelectFireComplex,
       nextCameraPos,
       densityMode,
       drawing,
@@ -741,6 +773,10 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
               : object && (object as TrackedBus).route !== undefined &&
                   (object as TrackedBus).operator !== undefined
                 ? buildBusTooltip(object as TrackedBus)
+                : object && (object as FireComplex).kind === "industrial"
+                  ? buildIndustrialTooltip(object as FireComplex)
+                : object && (object as FireDetection).frp !== undefined
+                  ? buildFireTooltip(object as FireDetection)
                 : object && (object as Alert).category
                   ? buildAlertTooltip(object as Alert)
                   : buildTooltip(object as TrackedVessel | null)
@@ -962,6 +998,34 @@ function buildIncidentTooltip(i: Incident) {
       <div style="font-family:Inter,system-ui,sans-serif;min-width:170px;max-width:240px">
         <div style="font-weight:600;margin-bottom:2px">${escapeHtml(i.title)}</div>
         <div style="opacity:.75;font-size:11px;text-transform:capitalize"><span style="color:${c}">${escapeHtml(i.severity)} ${escapeHtml(i.category)}</span> · click for detail</div>
+      </div>`,
+    style: tooltipStyle(),
+  };
+}
+
+function buildFireTooltip(f: FireDetection) {
+  return {
+    html: `
+      <div style="font-family:Inter,system-ui,sans-serif;min-width:150px;max-width:230px">
+        <div style="display:flex;align-items:center;gap:6px;font-weight:600;margin-bottom:2px">
+          <span style="width:10px;height:10px;border-radius:9999px;background:#f97316"></span>
+          Wildfire · ${Math.round(f.frp)} MW
+        </div>
+        <div style="opacity:.75;font-size:11px">${escapeHtml(f.satellite)} · ${escapeHtml(f.instrument)} · tap for detail</div>
+      </div>`,
+    style: tooltipStyle(),
+  };
+}
+
+function buildIndustrialTooltip(c: FireComplex) {
+  return {
+    html: `
+      <div style="font-family:Inter,system-ui,sans-serif;min-width:150px;max-width:230px">
+        <div style="display:flex;align-items:center;gap:6px;font-weight:600;margin-bottom:2px">
+          <span style="width:10px;height:10px;border-radius:9999px;background:#64748b"></span>
+          Industrial heat · ${Math.round(c.total_frp)} MW
+        </div>
+        <div style="opacity:.75;font-size:11px">${escapeHtml(c.place ?? "Persistent thermal source")} · not a wildfire · tap for detail</div>
       </div>`,
     style: tooltipStyle(),
   };

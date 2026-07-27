@@ -30,10 +30,11 @@ _ALERT_FRAMES = ("geofence_event", "risk_event")
 class Broadcaster:
     def __init__(
         self, store, hz: float, air_store=None, bus_store=None, train_store=None,
-        tube_store=None, incident_store=None,
+        tube_store=None, incident_store=None, fire_store=None,
     ) -> None:
         self._store = store
         self._air_store = air_store  # optional AircraftStore (ADS-B domain)
+        self._fire_store = fire_store  # optional FireStore (NASA FIRMS domain)
         self._bus_store = bus_store  # optional BusStore (land domain)
         self._train_store = train_store  # optional TrainStore (rail domain)
         self._tube_store = tube_store  # optional TubeStore (London Underground)
@@ -49,6 +50,7 @@ class Broadcaster:
         self._last_sent_train: dict[str, float] = {}  # train id -> ts last broadcast
         self._last_sent_tube: dict[str, float] = {}  # tube train id -> ts last broadcast
         self._last_sent_incident: dict[str, float] = {}  # incident id -> updated last broadcast
+        self._last_sent_fire: dict[str, float] = {}  # detection id -> ts last broadcast
         # Optional sink that persists alert frames (set by the app).
         self.alert_sink: Callable[[dict], None] | None = None
 
@@ -100,6 +102,11 @@ class Broadcaster:
             await ws.send_json(
                 {"type": "incident_snapshot", "incidents": [i.model_dump() for i in incs]}
             )
+        if self._fire_store is not None:
+            fires = await self._fire_store.snapshot()
+            await ws.send_json(
+                {"type": "fire_snapshot", "fires": [f.model_dump() for f in fires]}
+            )
 
     def disconnect(self, ws: WebSocket) -> None:
         self._clients.discard(ws)
@@ -131,6 +138,8 @@ class Broadcaster:
             await self._tick_tube()
         if self._incident_store is not None:
             await self._tick_incidents()
+        if self._fire_store is not None:
+            await self._tick_fires()
 
     async def _tick_vessels(self) -> None:
         vessels = await self._store.snapshot()
@@ -263,6 +272,26 @@ class Broadcaster:
             "incidents": [i.model_dump() for i in changed],
             "removed": removed,
         })
+
+    async def _tick_fires(self) -> None:
+        fires = await self._fire_store.snapshot()
+        current_ids = {f.id for f in fires}
+        # A detection never changes, so ts differs only for genuinely new pixels.
+        changed = [f for f in fires if self._last_sent_fire.get(f.id) != f.ts]
+        removed = [i for i in self._last_sent_fire if i not in current_ids]
+        for f in fires:
+            self._last_sent_fire[f.id] = f.ts
+        for i in removed:
+            self._last_sent_fire.pop(i, None)
+        if not changed and not removed:
+            return
+        await self._broadcast(
+            {
+                "type": "fire_update",
+                "fires": [f.model_dump() for f in changed],
+                "removed": removed,
+            }
+        )
 
     async def send_frame(self, frame: dict) -> None:
         """Push an out-of-band frame (e.g. a geofence event) to all clients now,

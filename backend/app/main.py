@@ -63,6 +63,8 @@ from .incidents.news import NewsSource
 from .incidents.social import SocialSource
 from .store import create_store
 from .store.aircraft import AircraftStore
+from .store.fire import FireStore
+from .sources.fire import FireSource
 from .store.bus import BusStore
 from .store.train import TrainStore
 from .store.tube import TubeStore
@@ -178,6 +180,40 @@ async def _heli_loop(app: FastAPI) -> None:
             log.warning("inference detection failed: %s", exc)
 
 
+async def _fire_complex_loop(app: FastAPI) -> None:
+    """Cluster raw FIRMS detections into named fire complexes and enrich the
+    strongest with nearest-town + wind-driven spread. Runs off the request path
+    (reverse-geocode is rate-limited) so ``/api/fire/complexes`` is instant."""
+    if app.state.fire_store is None:
+        return
+    import httpx
+    from .fire.cluster import cluster_detections
+    from .fire.enrich import enrich_complex
+
+    place_cache: dict = {}
+    wind_cache: dict = {}
+    ENRICH_TOP = 12  # only the strongest fires get the (rate-limited) enrichment
+    while True:
+        dets = await app.state.fire_store.snapshot()
+        if not dets:
+            await asyncio.sleep(15)  # store not warm yet — retry soon, not in 5 min
+            continue
+        try:
+            complexes = cluster_detections(dets, time.time())
+            # Publish the clustered complexes immediately, then enrich in place —
+            # so one geocode/wind failure never blanks the whole list.
+            app.state.fire_complexes = complexes
+            async with httpx.AsyncClient(timeout=httpx.Timeout(25.0)) as client:
+                for fc in complexes[:ENRICH_TOP]:
+                    try:
+                        await enrich_complex(fc, client, place_cache, wind_cache)
+                    except Exception as exc:  # noqa: BLE001
+                        log.warning("fire enrich failed (%s): %s", fc.id, exc)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("fire-complex build failed: %s", exc)
+        await asyncio.sleep(app.state.settings.fire_complex_sec)
+
+
 async def _risk_loop(app: FastAPI) -> None:
     """Periodic behavioral risk detection (gated by the risk_engine flag)."""
     interval = app.state.settings.risk_eval_sec
@@ -235,6 +271,12 @@ async def lifespan(app: FastAPI):
     if air_store is not None:
         await air_store.start()
     app.state.air_store = air_store
+
+    fire_store = FireStore() if settings.enable_fire else None
+    if fire_store is not None:
+        await fire_store.start()
+    app.state.fire_store = fire_store
+    app.state.fire_complexes = []  # clustered + enriched, refreshed by a loop
     # Land domain: London buses (BODS SIRI-VM), fanned out on the same socket.
     bus_store = BusStore() if settings.enable_bus else None
     if bus_store is not None:
@@ -283,7 +325,7 @@ async def lifespan(app: FastAPI):
     broadcaster = Broadcaster(
         store, settings.broadcast_hz,
         air_store=air_store, bus_store=bus_store, train_store=train_store,
-        tube_store=tube_store, incident_store=incident_store,
+        tube_store=tube_store, incident_store=incident_store, fire_store=fire_store,
     )
     broadcaster.start()
     app.state.broadcaster = broadcaster
@@ -310,6 +352,9 @@ async def lifespan(app: FastAPI):
     # supervisor rails, so it lives alongside the vessel sources.
     if air_store is not None:
         sources.append(AdsbLolSource(air_store, settings))
+    if fire_store is not None:
+        # NASA FIRMS wildfire eye — idles (amber) until FIRMS_MAP_KEY is set.
+        sources.append(FireSource(fire_store, settings))
     if bus_store is not None:
         sources.append(BodsSource(bus_store, settings))
     if train_store is not None:
@@ -432,6 +477,11 @@ async def lifespan(app: FastAPI):
     geofence_task = asyncio.create_task(_geofence_loop(app), name="geofence-eval")
     risk_task = asyncio.create_task(_risk_loop(app), name="risk-eval")
     heli_task = asyncio.create_task(_heli_loop(app), name="heli-detect")
+    fire_task = (
+        asyncio.create_task(_fire_complex_loop(app), name="fire-complex")
+        if fire_store is not None
+        else None
+    )
     density_task = asyncio.create_task(_density_loop(app), name="density-sample")
     rate_task = asyncio.create_task(_rate_loop(app), name="source-rate")
     history_task = asyncio.create_task(_history_loop(app), name="history-sample")
@@ -459,6 +509,10 @@ async def lifespan(app: FastAPI):
         geofence_task.cancel()
         risk_task.cancel()
         heli_task.cancel()
+        if fire_task is not None:
+            fire_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await fire_task
         density_task.cancel()
         rate_task.cancel()
         history_task.cancel()
@@ -497,6 +551,8 @@ async def lifespan(app: FastAPI):
         await store.close()
         if air_store is not None:
             await air_store.close()
+        if fire_store is not None:
+            await fire_store.close()
         if bus_store is not None:
             await bus_store.close()
         if app.state.air_enricher is not None:
@@ -540,6 +596,7 @@ async def healthz():
         "sources": [_source_status(s) for s in app.state.sources],
         "vessels": await app.state.store.count(),
         "aircraft": await app.state.air_store.count() if app.state.air_store else 0,
+        "fires": await app.state.fire_store.count() if app.state.fire_store else 0,
         "buses": await app.state.bus_store.count() if app.state.bus_store else 0,
         "trains": await app.state.train_store.count() if app.state.train_store else 0,
         "tube": await app.state.tube_store.count() if app.state.tube_store else 0,
@@ -754,6 +811,8 @@ async def feature_flags():
     flags["google_3d"] = bool(app.state.settings.google_maps_key)
     # Air-traffic layer available only when the ADS-B feed is enabled server-side.
     flags["air"] = bool(app.state.settings.enable_air)
+    # Wildfire layer available when FIRMS is enabled AND a map key is configured.
+    flags["fire"] = bool(app.state.settings.enable_fire and app.state.settings.firms_map_key)
     # London buses available when the BODS feed is enabled + keyed server-side.
     flags["bus"] = bool(app.state.settings.enable_bus and app.state.settings.bods_api_key)
     # London traffic cameras available when the TfL feed is enabled server-side.
@@ -856,6 +915,26 @@ async def aircraft_detail(hex: str):
         "info": info,
         "route": route,
     }
+
+
+@app.get("/api/fire")
+async def list_fires():
+    """All live wildfire detections (NASA FIRMS) — the fire layer's warm-start
+    fallback for clients that fetch before the WebSocket snapshot arrives."""
+    store = app.state.fire_store
+    if store is None:
+        raise HTTPException(404, "fire feed disabled")
+    fires = await store.snapshot()
+    return {"fires": [f.model_dump() for f in fires]}
+
+
+@app.get("/api/fire/complexes")
+async def list_fire_complexes():
+    """Clustered fire complexes — named fires with growth + wind-driven spread,
+    strongest first. Built off the request path by a background loop."""
+    if app.state.fire_store is None:
+        raise HTTPException(404, "fire feed disabled")
+    return {"complexes": [c.model_dump() for c in app.state.fire_complexes]}
 
 
 @app.get("/api/cameras")

@@ -13,6 +13,7 @@ import type {
   Train,
   TubeTrain,
   Incident,
+  FireDetection,
   Vessel,
 } from "@/types";
 import type { Geofence } from "@/geofence/types";
@@ -53,6 +54,9 @@ export function useVesselsSocket() {
   const tubeRef = useRef<Map<string, TubeTrain>>(new Map());
   // Live incidents (Argus spine), keyed by id.
   const incidentsRef = useRef<Map<string, Incident>>(new Map());
+  // Live wildfire detections (NASA FIRMS), keyed by detection id. Static points
+  // — no trail, no dead-reckoning.
+  const firesRef = useRef<Map<string, FireDetection>>(new Map());
   const [version, setVersion] = useState(0);
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
   const [events, setEvents] = useState<GeofenceEvent[]>([]);
@@ -170,6 +174,13 @@ export function useVesselsSocket() {
     Object.assign(prev, i);
   }, []);
 
+  const applyFire = useCallback((f: FireDetection) => {
+    const map = firesRef.current;
+    const prev = map.get(f.id);
+    if (!prev) { map.set(f.id, f); return; }
+    Object.assign(prev, f);
+  }, []);
+
   // Client-side backstop eviction. Entities normally leave via the backend's
   // `removed` lists; if one is ever missed it would otherwise live (trail and
   // all) for the whole session. TTLs sit well above the backend's own.
@@ -261,6 +272,12 @@ export function useVesselsSocket() {
         } else if (frame.type === "incident_update") {
           for (const i of frame.incidents) applyIncident(i);
           for (const id of frame.removed) incidentsRef.current.delete(id);
+        } else if (frame.type === "fire_snapshot") {
+          firesRef.current.clear();
+          for (const f of frame.fires) applyFire(f);
+        } else if (frame.type === "fire_update") {
+          for (const f of frame.fires) applyFire(f);
+          for (const id of frame.removed) firesRef.current.delete(id);
         } else if (frame.type === "geofence_event") {
           setEvents((prev) => [frame, ...prev].slice(0, MAX_EVENTS));
           return; // not a vessel update — no render bump needed
@@ -348,7 +365,7 @@ export function useVesselsSocket() {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       ws?.close();
     };
-  }, [applyVessel, applyAircraft, applyBus, applyTrain, applyTube, applyIncident, scheduleRender]);
+  }, [applyVessel, applyAircraft, applyBus, applyTrain, applyTube, applyIncident, applyFire, scheduleRender]);
 
   return {
     vesselsRef,
@@ -357,6 +374,7 @@ export function useVesselsSocket() {
     trainsRef,
     tubeRef,
     incidentsRef,
+    firesRef,
     version,
     status,
     events,

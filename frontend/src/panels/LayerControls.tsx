@@ -46,6 +46,9 @@ interface LayerControlsProps {
   showAir: boolean;
   onToggleAir: (v: boolean) => void;
   airAvailable: boolean;
+  showFire: boolean;
+  onToggleFire: (v: boolean) => void;
+  fireAvailable: boolean;
   showBus: boolean;
   showTrain: boolean;
   showTube: boolean;
@@ -166,6 +169,9 @@ export function LayerControls({
   showAir,
   onToggleAir,
   airAvailable,
+  showFire,
+  onToggleFire,
+  fireAvailable,
   showBus,
   showTrain,
   showTube,
@@ -241,6 +247,18 @@ export function LayerControls({
               hint="Live aircraft over the region, coloured by altitude."
               checked={showAir}
               onChange={onToggleAir}
+            />
+          </Section>
+        )}
+
+        {fireAvailable && (
+          <Section title="Fire">
+            <Row
+              icon={Flame}
+              label="Wildfires (NASA FIRMS)"
+              hint="Live satellite fire detections over Iberia & France, glowing by intensity (fire radiative power). Near-real-time from VIIRS."
+              checked={showFire}
+              onChange={onToggleFire}
             />
           </Section>
         )}

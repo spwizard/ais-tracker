@@ -14,6 +14,7 @@ export type PanelId =
   | "railpulse"
   | "londonpulse"
   | "incidents"
+  | "wildfires"
   | "zones"
   | "analyst";
 
@@ -31,6 +32,7 @@ export const PANEL_IDS: PanelId[] = [
   "railpulse",
   "londonpulse",
   "incidents",
+  "wildfires",
   "zones",
   "analyst",
 ];
@@ -50,6 +52,7 @@ export const PANEL_W: Record<PanelId, number> = {
   railpulse: 340,
   londonpulse: 320,
   incidents: 320,
+  wildfires: 320,
   zones: 288,
   analyst: 380,
 };
@@ -69,6 +72,7 @@ export const PANEL_EST_H: Record<PanelId, number> = {
   railpulse: 420,
   londonpulse: 340,
   incidents: 440,
+  wildfires: 440,
   zones: 360,
   analyst: 540,
 };
@@ -164,6 +168,11 @@ function defaults(): PanelMap {
       y: MARGIN + PANEL_EST_H.stats + GAP,
     },
     incidents: {
+      open: false,
+      x: MARGIN,
+      y: MARGIN + PANEL_EST_H.stats + GAP,
+    },
+    wildfires: {
       open: false,
       x: MARGIN,
       y: MARGIN + PANEL_EST_H.stats + GAP,

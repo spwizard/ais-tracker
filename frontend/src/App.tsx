@@ -34,10 +34,12 @@ import { useLondonPulse } from "@/hooks/useLondonPulse";
 import { LondonPulse } from "@/panels/LondonPulse";
 import { IncidentCard } from "@/panels/IncidentCard";
 import { IncidentsPanel } from "@/panels/IncidentsPanel";
+import { WildfiresPanel } from "@/panels/WildfiresPanel";
+import { useFireComplexes } from "@/hooks/useFireComplexes";
 import { useTubeNetwork } from "@/hooks/useTubeNetwork";
 import { useCameraWall } from "@/hooks/useCameraWall";
 import { nearbyCameras, nextCameraAhead } from "@/lib/nearbyCameras";
-import type { Camera, TrackedBus, TrackedTrain, TubeTrain, Incident } from "@/types";
+import type { Camera, TrackedBus, TrackedTrain, TubeTrain, Incident, FireDetection, FireComplex } from "@/types";
 import { MapControls } from "@/panels/MapControls";
 import { ZonesPanel } from "@/panels/ZonesPanel";
 import { DrawToolbar } from "@/panels/DrawToolbar";
@@ -86,7 +88,7 @@ const SEARCH_API = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 const SEARCH_TRACK_COLOR: [number, number, number] = [180, 210, 255];
 
 export default function App() {
-  const { vesselsRef, aircraftRef, busesRef, trainsRef, tubeRef, incidentsRef, version, status, events, riskEvents, flagged, geofenceSync, setTrailGate } =
+  const { vesselsRef, aircraftRef, busesRef, trainsRef, tubeRef, incidentsRef, firesRef, version, status, events, riskEvents, flagged, geofenceSync, setTrailGate } =
     useVesselsSocket();
   const { panels, setOpen, toggle, togglePin, move, focus, zIndexOf, autoPlace } =
     usePanels();
@@ -128,6 +130,10 @@ export default function App() {
   const tubeAvailable = useFlag("tube");
   const [showIncidents, setShowIncidents] = useState(false);
   const incidentsAvailable = useFlag("incidents");
+  const [showFire, setShowFire] = useState(false); // NASA FIRMS wildfire layer
+  const fireAvailable = useFlag("fire");
+  const [selectedFireId, setSelectedFireId] = useState<string | null>(null);
+  const fireComplexes = useFireComplexes(showFire);
   const [selectedIncidentId, setSelectedIncidentId] = useState<string | null>(null);
   const tubeNetwork = useTubeNetwork(showTube);
   const [selectedBusId, setSelectedBusId] = useState<string | null>(null);
@@ -393,6 +399,106 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [version, incidentsRef]);
   const incidents = showIncidents ? allIncidents : [];
+
+  const fires = useMemo<FireDetection[]>(() => {
+    if (!showFire) return [];
+    return Array.from(firesRef.current.values());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [version, firesRef, showFire]);
+
+  const selectedFire = useMemo(
+    () => fireComplexes.find((c) => c.id === selectedFireId) ?? null,
+    [fireComplexes, selectedFireId],
+  );
+  // Suspected fixed industrial heat sources — rendered as calm slate markers so
+  // a power station never reads as a wildfire on the map.
+  const industrialFires = useMemo(
+    () => (showFire ? fireComplexes.filter((c) => c.kind === "industrial") : []),
+    [fireComplexes, showFire],
+  );
+  const selectFire = (c: FireComplex) => {
+    setSelectedFireId(c.id);
+    mapRef.current?.flyTo({ longitude: c.lon, latitude: c.lat, zoom: 8.5 });
+  };
+  // Tap a fire on the map → open the Wildfires sheet on the nearest complex's
+  // detail. Detections don't carry a cluster id, so snap to the closest complex.
+  const selectFireOnMap = (d: FireDetection | null) => {
+    if (!d || fireComplexes.length === 0) return;
+    let best = fireComplexes[0];
+    let bestD = Infinity;
+    for (const c of fireComplexes) {
+      const dd = (c.lat - d.lat) ** 2 + (c.lon - d.lon) ** 2;
+      if (dd < bestD) { bestD = dd; best = c; }
+    }
+    if (bestD > 0.5 * 0.5) return; // clicked noise far from any tracked fire
+    setOpen("wildfires", true);
+    selectFire(best);
+  };
+  // Tap an industrial marker → open its labelled detail directly.
+  const selectComplexOnMap = (c: FireComplex | null) => {
+    if (!c) return;
+    setOpen("wildfires", true);
+    selectFire(c);
+  };
+
+  // Fire focus: light up only wildfires and quiet every other layer, so the
+  // fire picture is clean. Reused by the toggle and by a shared ?layers=fire URL.
+  const focusFireView = useCallback((fly = true) => {
+    setShowVessels(false);
+    setShowAir(false);
+    setShowBus(false);
+    setShowTube(false);
+    setShowTrain(false);
+    setShowCameras(false);
+    setShowIncidents(false);
+    setOpen("incidents", false);
+    setDensityMode(false);
+    setShowFire(true);
+    setOpen("wildfires", true);
+    if (fly) mapRef.current?.flyTo({ longitude: -1.5, latitude: 41.5, zoom: 5.3 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // --- URL ↔ layer sync: shareable deep links like ?layers=fire ------------
+  const LAYER_STATE: Record<string, [boolean, (v: boolean) => void]> = {
+    vessels: [showVessels, setShowVessels],
+    air: [showAir, setShowAir],
+    fire: [showFire, setShowFire],
+    incidents: [showIncidents, setShowIncidents],
+    bus: [showBus, setShowBus],
+    tube: [showTube, setShowTube],
+    train: [showTrain, setShowTrain],
+    cameras: [showCameras, setShowCameras],
+  };
+  const urlApplied = useRef(false);
+  // On load: apply the ?layers= set exactly (listed on, everything else off).
+  useEffect(() => {
+    const raw = new URLSearchParams(window.location.search).get("layers");
+    if (raw !== null) {
+      const want = new Set(raw.split(",").map((s) => s.trim()).filter(Boolean));
+      if (want.has("fire")) {
+        focusFireView(false); // quiet others, fire on
+        setTimeout(() => mapRef.current?.flyTo({ longitude: -1.5, latitude: 41.5, zoom: 5.3 }), 800);
+      } else {
+        for (const [key, [, set]] of Object.entries(LAYER_STATE)) set(want.has(key));
+        if (want.has("incidents")) setOpen("incidents", true);
+      }
+    }
+    urlApplied.current = true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // On change: reflect active layers back into the URL so the link is shareable.
+  useEffect(() => {
+    if (!urlApplied.current) return;
+    const active = Object.entries(LAYER_STATE).filter(([, [on]]) => on).map(([k]) => k);
+    const p = new URLSearchParams(window.location.search);
+    if (active.length) p.set("layers", active.join(","));
+    else p.delete("layers");
+    const qs = p.toString();
+    window.history.replaceState(null, "", qs ? `${window.location.pathname}?${qs}` : window.location.pathname);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showVessels, showAir, showFire, showIncidents, showBus, showTube, showTrain, showCameras]);
+
   const selectedIncident = useMemo(
     () => (selectedIncidentId ? incidentsRef.current.get(selectedIncidentId) ?? null : null),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -677,8 +783,11 @@ export default function App() {
     [networkMmsi, version, vesselsRef],
   );
 
-  // Unified toast feed: geofence events + behavioral risk events.
+  // Unified toast feed: geofence events + behavioral risk events. These are all
+  // vessel alerts, so they only surface when the vessels layer is on — no
+  // shipping toasts popping over a fire or London view.
   const toastAlerts = useMemo<ToastAlert[]>(() => {
+    if (!showVessels) return [];
     const verb: Record<string, string> = {
       enter: "entered",
       exit: "left",
@@ -710,7 +819,7 @@ export default function App() {
       lon: e.lon,
     }));
     return [...risk, ...geo];
-  }, [events, riskEvents]);
+  }, [events, riskEvents, showVessels]);
 
   // Most-recent event timestamp per fence — drives the on-map border pulse.
   const fenceFlash = useMemo(() => {
@@ -1012,6 +1121,11 @@ export default function App() {
         onSelectTrain={selectTrain}
         selectedTrainId={selectedTrainId}
         onSelectStation={selectStation}
+        fires={fires}
+        showFire={showFire}
+        onSelectFire={selectFireOnMap}
+        industrialFires={industrialFires}
+        onSelectFireComplex={selectComplexOnMap}
         nextCameraPos={nextCameraPos}
       />
 
@@ -1040,6 +1154,7 @@ export default function App() {
             railpulse: panels.railpulse.open,
             londonpulse: panels.londonpulse.open,
             incidents: panels.incidents.open,
+            wildfires: panels.wildfires.open,
             zones: panels.zones.open,
             analyst: panels.analyst.open,
           }}
@@ -1118,6 +1233,16 @@ export default function App() {
             showAir={showAir}
             onToggleAir={setShowAir}
             airAvailable={airAvailable}
+            showFire={showFire}
+            onToggleFire={(v) => {
+              if (v) focusFireView();
+              else {
+                setShowFire(false);
+                setOpen("wildfires", false);
+                setSelectedFireId(null);
+              }
+            }}
+            fireAvailable={fireAvailable}
             showBus={showBus}
             onToggleBus={toggleLondonLayer(setShowBus)}
             showTrain={showTrain}
@@ -1390,6 +1515,15 @@ export default function App() {
               setSelectedIncidentId(null);
             }}
             onClose={() => setSelectedIncidentId(null)}
+          />
+        )}
+        {panels.wildfires.open && (
+          <WildfiresPanel
+            chrome={chromeFor("wildfires")}
+            complexes={fireComplexes}
+            selected={selectedFire}
+            onSelect={selectFire}
+            onBack={() => setSelectedFireId(null)}
           />
         )}
         <AlertToasts

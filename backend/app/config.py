@@ -58,6 +58,39 @@ class Settings(BaseSettings):
     def air_regions(self) -> list[tuple[float, float, int]]:
         return [tuple(r) for r in json.loads(self.air_regions_raw)]
 
+    # --- Wildfires (NASA FIRMS — free map key, near-real-time) --------------
+    enable_fire: bool = Field(default=True, alias="ENABLE_FIRE")
+    firms_url: str = Field(
+        default="https://firms.modaps.eosdis.nasa.gov", alias="FIRMS_URL"
+    )
+    firms_map_key: str = Field(default="", alias="FIRMS_MAP_KEY")
+    # Datasets to fuse (VIIRS 375 m across the three satellites for coverage +
+    # recency; the store dedupes overlap). Add MODIS_NRT for wider history.
+    fire_sources_raw: str = Field(
+        default=json.dumps(
+            ["VIIRS_NOAA20_NRT", "VIIRS_NOAA21_NRT", "VIIRS_SNPP_NRT"]
+        ),
+        alias="FIRE_SOURCES",
+    )
+    # Poll regions as JSON: a list of [west, south, east, north] bboxes. Default
+    # covers Iberia + France + all of the UK & Ireland (up to Shetland).
+    fire_regions_raw: str = Field(
+        default=json.dumps([[-11.0, 35.0, 10.0, 61.0]]),
+        alias="FIRE_REGIONS",
+    )
+    fire_day_range: int = Field(default=2, alias="FIRE_DAY_RANGE")  # 1–5
+    fire_poll_sec: float = Field(default=900.0, alias="FIRE_POLL_SEC")  # 15 min
+    fire_ttl_sec: int = Field(default=172_800, alias="FIRE_TTL_SEC")  # 48 h
+    fire_complex_sec: float = Field(default=300.0, alias="FIRE_COMPLEX_SEC")  # 5 min
+
+    @property
+    def fire_sources(self) -> list[str]:
+        return list(json.loads(self.fire_sources_raw))
+
+    @property
+    def fire_regions(self) -> list[tuple[float, float, float, float]]:
+        return [tuple(r) for r in json.loads(self.fire_regions_raw)]
+
     # --- Land: London buses (Bus Open Data Service SIRI-VM — free, needs key) --
     enable_bus: bool = Field(default=False, alias="ENABLE_BUS")
     bods_api_key: str = Field(default="", alias="BODS_API_KEY")
