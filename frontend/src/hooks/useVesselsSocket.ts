@@ -58,6 +58,13 @@ export function useVesselsSocket() {
   // — no trail, no dead-reckoning.
   const firesRef = useRef<Map<string, FireDetection>>(new Map());
   const [version, setVersion] = useState(0);
+  // Slow domains get their own version counters. `version` bumps on every rAF
+  // with vessel/air traffic (up to ~60Hz); keying rarely-changing collections
+  // (fires: ~15-min polls, incidents: minutes) on it rebuilt their arrays —
+  // and forced deck.gl attribute re-uploads + heatmap re-aggregation — at
+  // vessel-stream frequency for data that hadn't changed.
+  const [fireVersion, setFireVersion] = useState(0);
+  const [incidentVersion, setIncidentVersion] = useState(0);
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
   const [events, setEvents] = useState<GeofenceEvent[]>([]);
   const [riskEvents, setRiskEvents] = useState<RiskEvent[]>([]);
@@ -269,15 +276,19 @@ export function useVesselsSocket() {
         } else if (frame.type === "incident_snapshot") {
           incidentsRef.current.clear();
           for (const i of frame.incidents) applyIncident(i);
+          setIncidentVersion((v) => v + 1);
         } else if (frame.type === "incident_update") {
           for (const i of frame.incidents) applyIncident(i);
           for (const id of frame.removed) incidentsRef.current.delete(id);
+          setIncidentVersion((v) => v + 1);
         } else if (frame.type === "fire_snapshot") {
           firesRef.current.clear();
           for (const f of frame.fires) applyFire(f);
+          setFireVersion((v) => v + 1);
         } else if (frame.type === "fire_update") {
           for (const f of frame.fires) applyFire(f);
           for (const id of frame.removed) firesRef.current.delete(id);
+          setFireVersion((v) => v + 1);
         } else if (frame.type === "geofence_event") {
           setEvents((prev) => [frame, ...prev].slice(0, MAX_EVENTS));
           return; // not a vessel update — no render bump needed
@@ -376,6 +387,8 @@ export function useVesselsSocket() {
     incidentsRef,
     firesRef,
     version,
+    fireVersion,
+    incidentVersion,
     status,
     events,
     riskEvents,

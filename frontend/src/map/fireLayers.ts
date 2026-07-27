@@ -54,6 +54,18 @@ function frpColor(frp: number): [number, number, number] {
 
 const BIG_FIRE_FRP = 100; // detections above this get a pulsing halo
 
+// The halo's data subset, cached by input identity. buildFireLayers runs on
+// every 10Hz animation tick; filtering fresh each tick handed deck.gl a new
+// array reference — forcing a full attribute re-upload for data that only
+// actually changes when a satellite pass lands (~15 min).
+let _bigCache: { src: FireDetection[]; out: FireDetection[] } | null = null;
+function bigFires(fires: FireDetection[]): FireDetection[] {
+  if (_bigCache?.src !== fires) {
+    _bigCache = { src: fires, out: fires.filter((f) => f.frp >= BIG_FIRE_FRP) };
+  }
+  return _bigCache.out;
+}
+
 export interface FireLayerOptions {
   fires: FireDetection[];
   currentTime: number; // drives the halo pulse
@@ -95,7 +107,7 @@ export function buildFireLayers(opts: FireLayerOptions) {
     d.frp * (d.confidence === "high" ? 1.35 : d.confidence === "low" ? 0.7 : 1);
 
   const pulse = 0.5 + 0.5 * Math.sin(currentTime * 2.2);
-  const big = fires.filter((f) => f.frp >= BIG_FIRE_FRP);
+  const big = bigFires(fires);
   // Cores get denser/larger as you zoom in; kept tiny at continental zoom so the
   // heatmap bloom carries the wide view.
   const coreRadius = zoom < 6 ? 1.4 : zoom < 9 ? 2.2 : 3.4;
@@ -121,7 +133,11 @@ export function buildFireLayers(opts: FireLayerOptions) {
       data: big,
       pickable: Boolean(onClick),
       getPosition: (d) => [d.lon, d.lat],
-      getRadius: 6 + pulse * 7,
+      // Pulse via radiusScale (a uniform) rather than a getRadius updateTrigger:
+      // a trigger regenerates the radius attribute for every point every tick,
+      // a uniform costs nothing.
+      getRadius: 1,
+      radiusScale: 6 + pulse * 7,
       radiusUnits: "pixels",
       radiusMinPixels: 10, // generous touch target
       getFillColor: (d) => {
@@ -129,7 +145,6 @@ export function buildFireLayers(opts: FireLayerOptions) {
         return [c[0], c[1], c[2], 55];
       },
       onClick: (info) => onClick?.((info.object as FireDetection) ?? null),
-      updateTriggers: { getRadius: currentTime },
     }),
     // 3. Per-pixel hot cores — texture + the pickable detection.
     new ScatterplotLayer<FireDetection>({

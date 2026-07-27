@@ -87,8 +87,13 @@ const TRAIL_WINDOW_SEC = 900; // trails fade over the last 15 minutes
 const SEARCH_API = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 const SEARCH_TRACK_COLOR: [number, number, number] = [180, 210, 255];
 
+// Stable empties for toggled-off layers — a fresh [] every render would defeat
+// the reference-equality that lets deck.gl skip re-processing unchanged data.
+const NO_INCIDENTS: Incident[] = [];
+const NO_FIRES: FireDetection[] = [];
+
 export default function App() {
-  const { vesselsRef, aircraftRef, busesRef, trainsRef, tubeRef, incidentsRef, firesRef, version, status, events, riskEvents, flagged, geofenceSync, setTrailGate } =
+  const { vesselsRef, aircraftRef, busesRef, trainsRef, tubeRef, incidentsRef, firesRef, version, fireVersion, incidentVersion, status, events, riskEvents, flagged, geofenceSync, setTrailGate } =
     useVesselsSocket();
   const { panels, setOpen, toggle, togglePin, move, focus, zIndexOf, autoPlace } =
     usePanels();
@@ -394,17 +399,20 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [version, tubeRef, showTube]);
 
+  // Incidents + fires are keyed on their own (rare) version counters, NOT the
+  // vessel-driven `version` — a stable array identity between real changes is
+  // what lets deck.gl skip attribute re-uploads / heatmap re-aggregation.
   const allIncidents = useMemo<Incident[]>(() => {
     return Array.from(incidentsRef.current.values());
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [version, incidentsRef]);
-  const incidents = showIncidents ? allIncidents : [];
+  }, [incidentVersion, incidentsRef]);
+  const incidents = showIncidents ? allIncidents : NO_INCIDENTS;
 
   const fires = useMemo<FireDetection[]>(() => {
-    if (!showFire) return [];
+    if (!showFire) return NO_FIRES;
     return Array.from(firesRef.current.values());
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [version, firesRef, showFire]);
+  }, [fireVersion, firesRef, showFire]);
 
   const selectedFire = useMemo(
     () => fireComplexes.find((c) => c.id === selectedFireId) ?? null,
@@ -502,7 +510,7 @@ export default function App() {
   const selectedIncident = useMemo(
     () => (selectedIncidentId ? incidentsRef.current.get(selectedIncidentId) ?? null : null),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [selectedIncidentId, version, incidentsRef],
+    [selectedIncidentId, incidentVersion, incidentsRef],
   );
 
   const selectedTrain = useMemo(

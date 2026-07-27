@@ -40,20 +40,35 @@ export interface IncidentLayerOptions {
   onClick: (i: Incident | null) => void;
 }
 
+const tierOf = (i: Incident) => incidentTier(i);
+
+// Halo/ring subsets cached by input identity — this builder runs on every 10Hz
+// animation tick, and a fresh filter each tick would hand deck.gl new array
+// references (attribute re-uploads) for data that changes every few minutes.
+let _subsets: { src: Incident[]; notable: Incident[]; ringed: Incident[] } | null = null;
+function subsetsOf(incidents: Incident[]) {
+  if (_subsets?.src !== incidents) {
+    _subsets = {
+      src: incidents,
+      // Draw the eye to what matters: serious incidents, and any human-reported
+      // or camera-confirmed one regardless of severity.
+      notable: incidents.filter(
+        (i) => i.verification !== "cleared" &&
+          (i.severity === "serious" || tierOf(i) === "reported" || tierOf(i) === "confirmed"),
+      ),
+      ringed: incidents.filter(
+        (i) => i.verification !== "cleared" && RING_COLOR[tierOf(i)] !== undefined,
+      ),
+    };
+  }
+  return _subsets;
+}
+
 export function buildIncidentLayers(opts: IncidentLayerOptions) {
   const { incidents, currentTime, zoom, onClick } = opts;
   if (zoom < INCIDENT_MIN_ZOOM || incidents.length === 0) return [];
   const pulse = 0.5 + 0.5 * Math.sin(currentTime * 3);
-  const tierOf = (i: Incident) => incidentTier(i);
-  // Draw the eye to what matters: serious incidents, and any human-reported or
-  // camera-confirmed one regardless of severity.
-  const notable = incidents.filter(
-    (i) => i.verification !== "cleared" &&
-      (i.severity === "serious" || tierOf(i) === "reported" || tierOf(i) === "confirmed"),
-  );
-  const ringed = incidents.filter(
-    (i) => i.verification !== "cleared" && RING_COLOR[tierOf(i)] !== undefined,
-  );
+  const { notable, ringed } = subsetsOf(incidents);
 
   return [
     // Pulsing halo under everything notable — colour it by credibility so a
@@ -62,13 +77,15 @@ export function buildIncidentLayers(opts: IncidentLayerOptions) {
       id: "incident-halo",
       data: notable,
       getPosition: (d) => [d.lon, d.lat],
-      getRadius: 10 + pulse * 8,
+      // Pulse via radiusScale (a uniform), not a getRadius trigger — a trigger
+      // regenerates the radius attribute for every point every tick.
+      getRadius: 1,
+      radiusScale: 10 + pulse * 8,
       radiusUnits: "pixels",
       getFillColor: (d) => {
         const c = RING_COLOR[tierOf(d)] ?? SEVERITY_COLOR.serious;
         return [c[0], c[1], c[2], 60];
       },
-      updateTriggers: { getRadius: currentTime, getFillColor: notable.length },
     }),
     // Crisp credibility ring on reported/confirmed pins — the visual signature
     // that separates a witnessed/verified incident from a routine roadwork.
@@ -86,7 +103,6 @@ export function buildIncidentLayers(opts: IncidentLayerOptions) {
         return [c[0], c[1], c[2], 230];
       },
       lineWidthMinPixels: 2,
-      updateTriggers: { getLineColor: ringed.length },
     }),
     // The pin.
     new ScatterplotLayer<Incident>({
