@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Argus eye — matches the app's dark navy + vivid blue accent -->
+  <rect width="64" height="64" rx="14" fill="#060a12"/>
+  <g fill="none" stroke="#3b8bf6" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M8 32s9-15 24-15 24 15 24 15-9 15-24 15S8 32 8 32Z"/>
+    <circle cx="32" cy="32" r="7.5" fill="#3b8bf6" stroke="none"/>
+  </g>
+</svg>
