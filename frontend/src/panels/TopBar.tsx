@@ -16,10 +16,13 @@ import {
   Moon,
   type LucideIcon,
 } from "lucide-react";
+import { useState } from "react";
 import { Separator } from "@/components/ui/separator";
 import { Hint } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { SourcesIndicator } from "@/panels/SourcesIndicator";
+import { Sheet } from "@/components/Sheet";
+import { useViewport } from "@/hooks/useViewport";
 import type { PanelId } from "@/hooks/usePanels";
 import type { Theme } from "@/hooks/useTheme";
 import type { ConnectionStatus, SourceStatus } from "@/types";
@@ -62,6 +65,40 @@ const DOCK: { id: PanelId; icon: LucideIcon; label: string }[] = [
   { id: "analyst", icon: Sparkles, label: "AI Analyst" },
 ];
 
+/** One tappable row in the mobile menu sheet. */
+function MenuRow({
+  icon: Icon, label, active, disabled, dot, onClick,
+}: {
+  icon: LucideIcon;
+  label: string;
+  active?: boolean;
+  disabled?: boolean;
+  dot?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      aria-disabled={disabled}
+      className={cn(
+        "flex items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition-colors",
+        disabled
+          ? "cursor-not-allowed text-muted-foreground/30"
+          : active
+            ? "bg-primary/15 text-primary"
+            : "text-foreground/90 hover:bg-foreground/5",
+      )}
+    >
+      <span className="relative">
+        <Icon className="h-[18px] w-[18px]" />
+        {dot && <span className="absolute -right-1 -top-1 h-1.5 w-1.5 rounded-full bg-primary" />}
+      </span>
+      {label}
+      {active && <span className="ml-auto text-[10px] uppercase tracking-wider text-primary/70">on</span>}
+    </button>
+  );
+}
+
 export function TopBar({
   status,
   total,
@@ -81,6 +118,83 @@ export function TopBar({
 }: TopBarProps) {
   const meta = STATUS_META[status];
   const StatusIcon = meta.icon;
+  const { sheetLayout } = useViewport();
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  // ---- Mobile / iPad-portrait: a compact bar + a menu sheet -----------------
+  // The desktop bar is a wide fixed pill that overflows a phone; here the brand
+  // + live count stay inline and everything else moves into a tap-through menu.
+  if (sheetLayout) {
+    const run = (fn: () => void) => () => {
+      fn();
+      setMenuOpen(false);
+    };
+    return (
+      <>
+        <header
+          data-island-bar
+          className="glass pointer-events-auto absolute inset-x-2 top-2 z-40 flex h-12 items-center gap-2 px-3 animate-fade-in"
+        >
+          <div className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-primary/15 text-primary">
+            <Eye className="h-4 w-4" />
+          </div>
+          <span className={cn("h-2 w-2 shrink-0 rounded-full", meta.dot)} />
+          <span className="text-xs tabular-nums">
+            <span className="font-semibold text-foreground">{visible.toLocaleString()}</span>
+            <span className="text-muted-foreground">/{total.toLocaleString()}</span>
+          </span>
+          <div className="ml-auto flex items-center gap-1">
+            <button
+              aria-label="Search"
+              onClick={() => onToggleIsland("search")}
+              className="grid h-9 w-9 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
+            >
+              <Search className="h-5 w-5" />
+            </button>
+            <button
+              aria-label="Menu"
+              onClick={() => setMenuOpen(true)}
+              className="relative grid h-9 w-9 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
+            >
+              <Layers className="h-5 w-5" />
+              {(hasAlerts || filtersActive) && (
+                <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-primary" />
+              )}
+            </button>
+          </div>
+        </header>
+
+        {menuOpen && (
+          <Sheet title="Menu" icon={Layers} onClose={() => setMenuOpen(false)}>
+            <div className="flex flex-col gap-0.5 p-2">
+              <MenuRow icon={SlidersHorizontal} label="Filters" active={island === "filters"} dot={filtersActive} onClick={run(() => onToggleIsland("filters"))} />
+              {DOCK.map((d) => {
+                const disabled = d.id === "detail" && !hasSelection;
+                return (
+                  <MenuRow
+                    key={d.id}
+                    icon={d.icon}
+                    label={d.label}
+                    active={panelOpen[d.id] && !disabled}
+                    disabled={disabled}
+                    onClick={run(() => !disabled && onTogglePanel(d.id))}
+                  />
+                );
+              })}
+              <MenuRow icon={Table2} label="Vessels table" active={dataTab === "vessels"} onClick={run(() => onOpenData("vessels"))} />
+              <MenuRow icon={Bell} label="Recent alerts" active={island === "alerts"} dot={hasAlerts} onClick={run(() => onToggleIsland("alerts"))} />
+              <div className="my-1 h-px bg-foreground/10" />
+              <MenuRow
+                icon={theme === "dark" ? Sun : Moon}
+                label={`${theme === "dark" ? "Light" : "Dark"} mode`}
+                onClick={() => onToggleTheme()}
+              />
+            </div>
+          </Sheet>
+        )}
+      </>
+    );
+  }
 
   return (
     <header

@@ -91,3 +91,15 @@
 .maplibregl-ctrl-attrib a {
   @apply !text-muted-foreground;
 }
+
+/* ---- Mobile / safe-area foundations (Phase 0) ---------------------------- */
+/* iPhone notch + home-indicator insets, used by the bottom bar and FAB stack. */
+.pb-safe { padding-bottom: max(0.5rem, env(safe-area-inset-bottom)); }
+.pt-safe { padding-top: max(0.5rem, env(safe-area-inset-top)); }
+.inset-b-safe { bottom: env(safe-area-inset-bottom); }
+
+/* On touch devices, give the map's own gestures room and stop the page itself
+   from rubber-band scrolling behind the fixed map. */
+@media (pointer: coarse) {
+  html, body { overscroll-behavior: none; touch-action: manipulation; }
+}

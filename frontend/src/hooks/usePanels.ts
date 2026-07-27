@@ -105,12 +105,19 @@ function viewport() {
  * bottom-left, map controls live bottom-right — so the corners are evenly
  * weighted. The detail panel starts closed and is auto-placed on first open.
  */
+/** Sheet layout (phones + portrait tablets) — used to keep the mobile chrome
+ *  clean: nothing auto-opens, and only one sheet shows at a time. */
+function isSheet(): boolean {
+  return typeof window !== "undefined" && window.innerWidth <= 1024;
+}
+
 function defaults(): PanelMap {
   const { vw, vh } = viewport();
+  const wide = !isSheet(); // start map-first on small screens (no auto-open panels)
   return {
     filters: { open: true, x: MARGIN, y: MARGIN },
-    stats: { open: true, x: vw - MARGIN - PANEL_W.stats, y: MARGIN },
-    layers: { open: true, x: MARGIN, y: vh - MARGIN - PANEL_EST_H.layers },
+    stats: { open: wide, x: vw - MARGIN - PANEL_W.stats, y: MARGIN },
+    layers: { open: wide, x: MARGIN, y: vh - MARGIN - PANEL_EST_H.layers },
     detail: {
       open: false,
       x: vw - MARGIN - PANEL_W.detail,
@@ -176,6 +183,10 @@ function defaults(): PanelMap {
 
 function load(): PanelMap {
   const base = defaults();
+  // On small screens the sheet layout ignores x/y anyway, and restoring saved
+  // desktop coordinates would drop panels off-screen — so only rehydrate saved
+  // positions in the floating (wide) layout.
+  if (typeof window !== "undefined" && window.innerWidth <= 1024) return base;
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return base;
@@ -242,12 +253,29 @@ export function usePanels() {
     }
   }, [panels]);
 
+  // On the sheet layout only one panel shows at a time (sheets can't tile), so
+  // opening one closes the rest. Desktop keeps its free-floating multi-panel feel.
+  const openExclusive = (prev: PanelMap, id: PanelId): PanelMap => {
+    const next = { ...prev };
+    for (const k of PANEL_IDS) if (next[k].open) next[k] = { ...next[k], open: false };
+    next[id] = { ...next[id], open: true };
+    return next;
+  };
+
   const setOpen = useCallback((id: PanelId, open: boolean) => {
-    setPanels((prev) => ({ ...prev, [id]: { ...prev[id], open } }));
+    setPanels((prev) =>
+      open && isSheet()
+        ? openExclusive(prev, id)
+        : { ...prev, [id]: { ...prev[id], open } },
+    );
   }, []);
 
   const toggle = useCallback((id: PanelId) => {
-    setPanels((prev) => ({ ...prev, [id]: { ...prev[id], open: !prev[id].open } }));
+    setPanels((prev) =>
+      !prev[id].open && isSheet()
+        ? openExclusive(prev, id)
+        : { ...prev, [id]: { ...prev[id], open: !prev[id].open } },
+    );
   }, []);
 
   const togglePin = useCallback((id: PanelId) => {

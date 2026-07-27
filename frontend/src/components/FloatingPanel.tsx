@@ -2,6 +2,8 @@ import { useCallback, useRef, type ReactNode } from "react";
 import { X, GripVertical, Pin, type LucideIcon } from "lucide-react";
 import { Hint } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { Sheet } from "@/components/Sheet";
+import { useViewport } from "@/hooks/useViewport";
 
 export interface PanelChrome {
   position: { x: number; y: number };
@@ -44,7 +46,18 @@ export function FloatingPanel({
   className,
   children,
 }: FloatingPanelProps) {
+  // Phones + iPad-portrait get a bottom sheet; desktop + iPad-landscape keep the
+  // draggable glass. This single switch makes every panel mobile-native.
+  const { sheetLayout } = useViewport();
   const dragRef = useRef<{ dx: number; dy: number } | null>(null);
+
+  if (sheetLayout) {
+    return (
+      <Sheet title={title} icon={Icon} onClose={onClose} actions={actions}>
+        {children}
+      </Sheet>
+    );
+  }
 
   const onPointerDown = useCallback(
     (e: React.PointerEvent) => {

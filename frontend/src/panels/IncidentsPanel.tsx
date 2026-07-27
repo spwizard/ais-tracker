@@ -154,7 +154,7 @@ export function IncidentsPanel({
             Nothing happening right now.
           </div>
         ) : (
-          <div className="max-h-[56vh] overflow-y-auto">
+          <div className="lg:max-h-[56vh] lg:overflow-y-auto">
             {live.map((i) => (
               <IncidentRow key={i.id} i={i} onFocus={onFocus} />
             ))}
