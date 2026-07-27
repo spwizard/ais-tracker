@@ -144,9 +144,10 @@ def test_status_trend_buckets():
     # Gone quiet: nothing in the last 24 h → cooling.
     cold = [_det(42.0, 2.0, age_h=a) for a in (26.0, 30.0, 34.0)]
     assert cluster_detections(cold, NOW)[0].status == "cooling"
-    # Steady (ratio 1.0, daytime-only so it can't read as industrial) → active.
-    steady = ([_det(43.0, 3.0, age_h=a) for a in (1.0, 12.0, 20.0)]
-              + [_det(43.0, 3.0, age_h=a) for a in (26.0, 36.0, 44.0)])
+    # Steady (ratio 1.0) but spread over a >4 km front — a real fire holding
+    # its ground, not a fixed point source → active.
+    steady = ([_det(43.0 + i * 0.025, 3.0, age_h=a) for i, a in enumerate((1.0, 12.0, 20.0))]
+              + [_det(43.0 + i * 0.025, 3.0, age_h=a) for i, a in enumerate((26.0, 36.0, 44.0))])
     assert cluster_detections(steady, NOW)[0].status == "active"
 
 
@@ -171,6 +172,27 @@ def test_industrial_point_source_labelled_even_when_faint():
         _det(41.65, 2.35, frp=20.0, age_h=30.0, daynight="N"),
     ]
     assert cluster_detections(spread, NOW)[0].kind == "wildfire"
+
+
+def test_night_only_flare_is_industrial_not_wildfire():
+    # Fawley-refinery regression: faint flares are visible ONLY on night passes
+    # (too dim against sunlit ground by day). Two nights of the same pinpoint
+    # source must read industrial — never a spreading wildfire.
+    pts = [
+        _det(50.83, -1.37, frp=2.0, age_h=3.0, daynight="N"),
+        _det(50.83, -1.37, frp=1.5, age_h=5.0, daynight="N"),
+        _det(50.83, -1.37, frp=2.0, age_h=27.0, daynight="N"),
+        _det(50.83, -1.37, frp=1.5, age_h=29.0, daynight="N"),
+    ]
+    out = cluster_detections(pts, NOW)
+    assert len(out) == 1 and out[0].kind == "industrial"
+
+
+def test_complex_carries_its_grid_cells():
+    pts = [_det(39.9, -0.24, frp=50, age_h=a) for a in (1.0, 3.0, 5.0)]
+    fc = cluster_detections(pts, NOW)[0]
+    # Cells use the same round(coord / CELL_DEG) mapping the client replicates.
+    assert fc.cells == [(round(39.9 / 0.15), round(-0.24 / 0.15))]
 
 
 def test_compass_and_destination():

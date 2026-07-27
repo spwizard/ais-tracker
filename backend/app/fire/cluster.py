@@ -41,17 +41,17 @@ def _haversine_km(lat1, lon1, lat2, lon2) -> float:
 
 
 def _is_industrial(span_km: float, duration_h: float, growth: float,
-                   count_prev: int, has_day: bool, has_night: bool) -> bool:
-    """Heuristic: a persistent, tiny-footprint hot spot that burns day *and*
-    night across more than a day at a steady rate is almost certainly a fixed
-    thermal source — a power station, refinery, flare or steelworks — not a
-    wildfire. Real fires either spread (span grows) or burn out. Deliberately
-    conservative so a genuine small fire isn't hidden."""
+                   count_prev: int) -> bool:
+    """Heuristic: a persistent, tiny-footprint hot spot burning across more
+    than a day at a steady rate is almost certainly a fixed thermal source — a
+    power station, refinery flare or steelworks — not a wildfire. Real fires
+    either spread (span grows) or burn out. Day/night pattern deliberately does
+    NOT matter: flares are often night-only (too faint against sunlit ground),
+    and a day-only persistent point is solar glint — neither is a wildfire."""
     return (
         span_km < 4.0            # a point, not a front
         and duration_h >= 20.0   # present across most of a day+
         and count_prev >= 1      # was already there yesterday
-        and has_day and has_night  # runs around the clock (not a transient burn)
         and 0.4 <= growth <= 2.0   # steady, not spreading or dying
     )
 
@@ -106,12 +106,15 @@ def cluster_detections(dets: list[FireDetection], now: float) -> list[FireComple
                     union(c, n)
 
     groups: dict[tuple[int, int], list[FireDetection]] = defaultdict(list)
+    group_cells: dict[tuple[int, int], list[tuple[int, int]]] = defaultdict(list)
     for c, pts in cells.items():
-        groups[find(c)].extend(pts)
+        root = find(c)
+        groups[root].extend(pts)
+        group_cells[root].append(c)
 
     # 3. Measure each complex.
     out: list[FireComplex] = []
-    for pts in groups.values():
+    for root, pts in groups.items():
         total_frp = sum(p.frp for p in pts)
         if len(pts) < MIN_COUNT:
             continue  # too few detections to say anything
@@ -127,10 +130,7 @@ def cluster_detections(dets: list[FireDetection], now: float) -> list[FireComple
         first = min(p.acq for p in pts)
         _dur_h = (newest.acq - first) / 3600.0
         _growth = round(count_24h / max(count_prev, 1), 2)
-        _industrial = _is_industrial(
-            span, _dur_h, _growth, count_prev,
-            any(p.daynight == "D" for p in pts), any(p.daynight == "N" for p in pts),
-        )
+        _industrial = _is_industrial(span, _dur_h, _growth, count_prev)
         # Wildfires must clear an intensity bar; persistent point-sources
         # (industrial) are surfaced even when faint, so we can label them — but
         # transient faint clusters (agricultural burns) are dropped as noise.
@@ -154,6 +154,10 @@ def cluster_detections(dets: list[FireDetection], now: float) -> list[FireComple
             first_seen=min(p.acq for p in pts),
             last_seen=newest.acq,
             last_satellite=newest.satellite,
+            # The complex's grid cells — lets the client attribute a raw
+            # detection to a complex exactly (same CELL_DEG rounding), so the
+            # ember field can glow only where a believed wildfire is.
+            cells=sorted(group_cells[root]),
         ))
 
     out.sort(key=lambda c: c.total_frp, reverse=True)

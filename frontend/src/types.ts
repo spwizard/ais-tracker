@@ -329,6 +329,9 @@ export interface FireComplex {
   first_seen: number;
   last_seen: number;
   last_satellite: string;
+  // Grid cells (round(lat/0.15), round(lon/0.15)) forming the cluster — used to
+  // attribute raw detections to a complex exactly (mirrors the backend grid).
+  cells: [number, number][];
   place: string | null;
   region: string | null;
   country: string | null;

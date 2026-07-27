@@ -175,9 +175,9 @@ interface MapViewProps {
   fires: FireDetection[];
   showFire: boolean;
   onSelectFire: (f: FireDetection | null) => void;
-  // Suspected fixed industrial heat sources — slate markers so they never read
-  // as wildfires. Clicking one opens its labelled detail.
-  industrialFires: FireComplex[];
+  // Clustered fire complexes: gate the ember field to believed wildfires and
+  // mark industrial heat sources slate. Clicking a marker opens its detail.
+  fireComplexes: FireComplex[];
   onSelectFireComplex: (c: FireComplex | null) => void;
   // The camera the selected bus is heading toward next — pulse a ring on it.
   nextCameraPos: [number, number] | null;
@@ -271,7 +271,7 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
     fires,
     showFire,
     onSelectFire,
-    industrialFires,
+    fireComplexes,
     onSelectFireComplex,
     nextCameraPos,
   } = props;
@@ -611,10 +611,10 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
       ...(showFire
         ? buildFireLayers({
             fires,
+            complexes: fireComplexes,
             currentTime,
             zoom,
             onClick: onSelectFire,
-            industrial: industrialFires,
             onSelectComplex: onSelectFireComplex,
           })
         : []),
@@ -667,7 +667,7 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
       fires,
       showFire,
       onSelectFire,
-      industrialFires,
+      fireComplexes,
       onSelectFireComplex,
       nextCameraPos,
       densityMode,

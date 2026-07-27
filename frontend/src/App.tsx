@@ -91,6 +91,7 @@ const SEARCH_TRACK_COLOR: [number, number, number] = [180, 210, 255];
 // the reference-equality that lets deck.gl skip re-processing unchanged data.
 const NO_INCIDENTS: Incident[] = [];
 const NO_FIRES: FireDetection[] = [];
+const NO_COMPLEXES: FireComplex[] = [];
 
 export default function App() {
   const { vesselsRef, aircraftRef, busesRef, trainsRef, tubeRef, incidentsRef, firesRef, version, fireVersion, incidentVersion, status, events, riskEvents, flagged, geofenceSync, setTrailGate } =
@@ -417,12 +418,6 @@ export default function App() {
   const selectedFire = useMemo(
     () => fireComplexes.find((c) => c.id === selectedFireId) ?? null,
     [fireComplexes, selectedFireId],
-  );
-  // Suspected fixed industrial heat sources — rendered as calm slate markers so
-  // a power station never reads as a wildfire on the map.
-  const industrialFires = useMemo(
-    () => (showFire ? fireComplexes.filter((c) => c.kind === "industrial") : []),
-    [fireComplexes, showFire],
   );
   const selectFire = (c: FireComplex) => {
     setSelectedFireId(c.id);
@@ -1132,7 +1127,7 @@ export default function App() {
         fires={fires}
         showFire={showFire}
         onSelectFire={selectFireOnMap}
-        industrialFires={industrialFires}
+        fireComplexes={showFire ? fireComplexes : NO_COMPLEXES}
         onSelectFireComplex={selectComplexOnMap}
         nextCameraPos={nextCameraPos}
       />

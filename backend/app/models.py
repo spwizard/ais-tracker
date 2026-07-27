@@ -153,6 +153,9 @@ class FireComplex(BaseModel):
     first_seen: float  # earliest acquisition (epoch)
     last_seen: float  # latest acquisition (epoch)
     last_satellite: str = ""  # satellite of the most recent pass
+    # Grid cells (round(lat/CELL_DEG), round(lon/CELL_DEG)) forming the cluster —
+    # the client uses these to attribute raw detections to a complex exactly.
+    cells: list[tuple[int, int]] = []
 
     # Enriched (reverse-geocode + wind) — populated best-effort, may be null.
     place: Optional[str] = None  # nearest settlement to the fire

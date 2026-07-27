@@ -54,35 +54,68 @@ function frpColor(frp: number): [number, number, number] {
 
 const BIG_FIRE_FRP = 100; // detections above this get a pulsing halo
 
-// The halo's data subset, cached by input identity. buildFireLayers runs on
-// every 10Hz animation tick; filtering fresh each tick handed deck.gl a new
-// array reference — forcing a full attribute re-upload for data that only
-// actually changes when a satellite pass lands (~15 min).
-let _bigCache: { src: FireDetection[]; out: FireDetection[] } | null = null;
-function bigFires(fires: FireDetection[]): FireDetection[] {
-  if (_bigCache?.src !== fires) {
-    _bigCache = { src: fires, out: fires.filter((f) => f.frp >= BIG_FIRE_FRP) };
+const CELL_DEG = 0.15; // must match the backend clustering grid (fire/cluster.py)
+
+// Derived subsets, cached by (fires, complexes) identity — this builder runs on
+// every 10Hz animation tick; recomputing fresh each tick would hand deck.gl new
+// array references (attribute re-uploads) for data that changes every ~15 min.
+let _derived: {
+  fires: FireDetection[];
+  complexes: FireComplex[];
+  visible: FireDetection[];
+  big: FireDetection[];
+  industrial: FireComplex[];
+} | null = null;
+
+function derive(fires: FireDetection[], complexes: FireComplex[]) {
+  if (_derived?.fires !== fires || _derived?.complexes !== complexes) {
+    const industrial = complexes.filter((c) => c.kind === "industrial");
+    // The ember field glows only where the clustering believes a wildfire is.
+    // Raw pixels the backend rejected — refinery flares, solar glint, one-off
+    // field burns — and pixels of industrial complexes render no embers (the
+    // slate marker carries those). Until the first complex list arrives, show
+    // everything rather than a briefly-blank map.
+    const wildfireCells = new Set<string>();
+    for (const c of complexes) {
+      if (c.kind === "industrial") continue;
+      for (const [x, y] of c.cells ?? []) wildfireCells.add(`${x},${y}`);
+    }
+    const visible = complexes.length
+      ? fires.filter((f) =>
+          wildfireCells.has(
+            `${Math.round(f.lat / CELL_DEG)},${Math.round(f.lon / CELL_DEG)}`,
+          ),
+        )
+      : fires;
+    _derived = {
+      fires,
+      complexes,
+      visible,
+      big: visible.filter((f) => f.frp >= BIG_FIRE_FRP),
+      industrial,
+    };
   }
-  return _bigCache.out;
+  return _derived;
 }
 
 export interface FireLayerOptions {
   fires: FireDetection[];
+  complexes: FireComplex[]; // clustered truth — gates the ember field
   currentTime: number; // drives the halo pulse
   zoom: number;
   onClick?: (f: FireDetection | null) => void;
-  industrial?: FireComplex[]; // suspected fixed thermal sources → slate markers
   onSelectComplex?: (c: FireComplex | null) => void;
 }
 
 export function buildFireLayers(opts: FireLayerOptions) {
-  const { fires, currentTime, zoom, onClick, industrial, onSelectComplex } = opts;
+  const { fires, complexes, currentTime, zoom, onClick, onSelectComplex } = opts;
   if (zoom < FIRE_MIN_ZOOM || fires.length === 0) return [];
+  const { visible, big, industrial } = derive(fires, complexes);
 
   // Suspected industrial / persistent thermal sources — a calm slate marker so a
   // power station never reads as a wildfire. Sits above the ember field.
   const industrialLayer =
-    industrial && industrial.length
+    industrial.length
       ? new ScatterplotLayer<FireComplex>({
           id: "fire-industrial",
           data: industrial,
@@ -107,7 +140,6 @@ export function buildFireLayers(opts: FireLayerOptions) {
     d.frp * (d.confidence === "high" ? 1.35 : d.confidence === "low" ? 0.7 : 1);
 
   const pulse = 0.5 + 0.5 * Math.sin(currentTime * 2.2);
-  const big = bigFires(fires);
   // Cores get denser/larger as you zoom in; kept tiny at continental zoom so the
   // heatmap bloom carries the wide view.
   const coreRadius = zoom < 6 ? 1.4 : zoom < 9 ? 2.2 : 3.4;
@@ -116,7 +148,7 @@ export function buildFireLayers(opts: FireLayerOptions) {
     // 1. The bloom — where the land is burning, visible from far out.
     new HeatmapLayer<FireDetection>({
       id: "fire-heat",
-      data: fires,
+      data: visible,
       getPosition: (d) => [d.lon, d.lat],
       getWeight: weightOf,
       aggregation: "SUM",
@@ -149,7 +181,7 @@ export function buildFireLayers(opts: FireLayerOptions) {
     // 3. Per-pixel hot cores — texture + the pickable detection.
     new ScatterplotLayer<FireDetection>({
       id: "fire-cores",
-      data: fires,
+      data: visible,
       pickable: Boolean(onClick),
       getPosition: (d) => [d.lon, d.lat],
       getRadius: (d) => (d.frp >= BIG_FIRE_FRP ? coreRadius * 1.5 : coreRadius),
