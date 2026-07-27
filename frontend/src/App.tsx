@@ -94,7 +94,7 @@ const NO_FIRES: FireDetection[] = [];
 const NO_COMPLEXES: FireComplex[] = [];
 
 export default function App() {
-  const { vesselsRef, aircraftRef, busesRef, trainsRef, tubeRef, incidentsRef, firesRef, version, fireVersion, incidentVersion, status, events, riskEvents, flagged, geofenceSync, setTrailGate } =
+  const { vesselsRef, aircraftRef, busesRef, trainsRef, tubeRef, incidentsRef, firesRef, version, fireVersion, incidentVersion, viewers, status, events, riskEvents, flagged, geofenceSync, setTrailGate } =
     useVesselsSocket();
   const { panels, setOpen, toggle, togglePin, move, focus, zIndexOf, autoPlace } =
     usePanels();
@@ -1138,6 +1138,7 @@ export default function App() {
           status={status}
           total={allVessels.length}
           visible={filtered.length}
+          viewers={viewers}
           sources={sources}
           island={island}
           onToggleIsland={toggleIsland}

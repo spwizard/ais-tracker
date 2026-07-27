@@ -34,6 +34,7 @@ interface TopBarProps {
   status: ConnectionStatus;
   total: number;
   visible: number;
+  viewers: number; // people watching live right now (connected WS clients)
   sources: SourceStatus[];
   island: IslandPanel | null;
   onToggleIsland: (p: IslandPanel) => void;
@@ -103,6 +104,7 @@ export function TopBar({
   status,
   total,
   visible,
+  viewers,
   sources,
   island,
   onToggleIsland,
@@ -143,6 +145,12 @@ export function TopBar({
             <span className="font-semibold text-foreground">{visible.toLocaleString()}</span>
             <span className="text-muted-foreground">/{total.toLocaleString()}</span>
           </span>
+          {viewers > 0 && (
+            <span className="flex items-center gap-1 rounded-md bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-primary">
+              <Eye className="h-3 w-3" />
+              {viewers}
+            </span>
+          )}
           <div className="ml-auto flex items-center gap-1">
             <button
               aria-label="Search"
@@ -257,6 +265,14 @@ export function TopBar({
           </span>
           <span className="text-muted-foreground">/{total.toLocaleString()}</span>
         </span>
+        {viewers > 0 && (
+          <Hint label={`${viewers} watching live right now`} side="bottom">
+            <span className="flex items-center gap-1 rounded-md bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-primary">
+              <Eye className="h-3 w-3" />
+              {viewers}
+            </span>
+          </Hint>
+        )}
       </div>
 
       <Separator orientation="vertical" className="hidden h-7 lg:block" />

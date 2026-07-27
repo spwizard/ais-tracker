@@ -563,6 +563,7 @@ export type ServerFrame =
   | { type: "incident_update"; incidents: Incident[]; removed: string[] }
   | { type: "fire_snapshot"; fires: FireDetection[] }
   | { type: "fire_update"; fires: FireDetection[]; removed: string[] }
+  | { type: "presence"; viewers: number }
   | GeofenceEvent
   | RiskEvent
   | { type: "flagged"; mmsis: number[] }

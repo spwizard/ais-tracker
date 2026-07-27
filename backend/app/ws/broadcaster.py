@@ -51,6 +51,7 @@ class Broadcaster:
         self._last_sent_tube: dict[str, float] = {}  # tube train id -> ts last broadcast
         self._last_sent_incident: dict[str, float] = {}  # incident id -> updated last broadcast
         self._last_sent_fire: dict[str, float] = {}  # detection id -> ts last broadcast
+        self._last_sent_viewers = -1  # live-viewer count last broadcast
         # Optional sink that persists alert frames (set by the app).
         self.alert_sink: Callable[[dict], None] | None = None
 
@@ -107,6 +108,9 @@ class Broadcaster:
             await ws.send_json(
                 {"type": "fire_snapshot", "fires": [f.model_dump() for f in fires]}
             )
+        # Tell the newcomer how many are watching (the tick only broadcasts on
+        # change, which a same-tick connect+disconnect could mask).
+        await ws.send_json({"type": "presence", "viewers": len(self._clients)})
 
     def disconnect(self, ws: WebSocket) -> None:
         self._clients.discard(ws)
@@ -127,6 +131,11 @@ class Broadcaster:
                 log.warning("broadcast tick failed: %s", exc)
 
     async def _tick(self) -> None:
+        # Live-viewer count, broadcast only when it changes (a few bytes, rare).
+        n = len(self._clients)
+        if n != self._last_sent_viewers:
+            self._last_sent_viewers = n
+            await self._broadcast({"type": "presence", "viewers": n})
         await self._tick_vessels()
         if self._air_store is not None:
             await self._tick_aircraft()

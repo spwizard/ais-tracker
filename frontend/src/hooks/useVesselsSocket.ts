@@ -65,6 +65,8 @@ export function useVesselsSocket() {
   // vessel-stream frequency for data that hadn't changed.
   const [fireVersion, setFireVersion] = useState(0);
   const [incidentVersion, setIncidentVersion] = useState(0);
+  // How many people are watching right now (all connected WS clients).
+  const [viewers, setViewers] = useState(0);
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
   const [events, setEvents] = useState<GeofenceEvent[]>([]);
   const [riskEvents, setRiskEvents] = useState<RiskEvent[]>([]);
@@ -289,6 +291,9 @@ export function useVesselsSocket() {
           for (const f of frame.fires) applyFire(f);
           for (const id of frame.removed) firesRef.current.delete(id);
           setFireVersion((v) => v + 1);
+        } else if (frame.type === "presence") {
+          setViewers(frame.viewers);
+          return; // not a map-data frame — no render bump needed
         } else if (frame.type === "geofence_event") {
           setEvents((prev) => [frame, ...prev].slice(0, MAX_EVENTS));
           return; // not a vessel update — no render bump needed
@@ -389,6 +394,7 @@ export function useVesselsSocket() {
     version,
     fireVersion,
     incidentVersion,
+    viewers,
     status,
     events,
     riskEvents,
