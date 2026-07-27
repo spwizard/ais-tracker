@@ -29,6 +29,6 @@ ssh "$HOST" "
   $REMOTE/.venv/bin/pip install -q -r $REMOTE/backend/requirements.txt
   sudo systemctl restart ais
   sleep 5
-  curl -s -m 5 http://localhost/healthz | python3 -c 'import sys,json; d=json.load(sys.stdin); print(\"  ✓ live · vessels:\", d[\"vessels\"], \"· sources up:\", sum(1 for s in d[\"sources\"] if s[\"connected\"]), \"/3\")'
+  curl -s -m 5 http://localhost:8000/healthz | python3 -c 'import sys,json; d=json.load(sys.stdin); print(\"  ✓ live · vessels:\", d[\"vessels\"], \"· sources up:\", sum(1 for s in d[\"sources\"] if s[\"connected\"]), \"/3\")'
 "
-echo "▸ done → http://${HOST#*@}"
+echo "▸ done → https://arguseyes.xyz (or http://${HOST#*@})"

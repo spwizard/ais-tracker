@@ -14,7 +14,8 @@ The app runs as **one instance** (single upstream AIS feed + in-memory fan-out).
 Don't run two.
 
 ```
-Internet ──80/443──▶ uvicorn (:80, serves API + WS + bundled frontend)
+Internet ──80/443──▶ Caddy (TLS for arguseyes.xyz) ──▶ uvicorn (127.0.0.1:8000,
+                                                         API + WS + bundled frontend)
                           └─ backend/data/  (registry, geofences, sanctions, ownership.sqlite)
 ```
 
@@ -104,7 +105,7 @@ python3 -m venv .venv
 ## 5. Firewall (iptables) + systemd service
 
 Open 80/443 **above** the REJECT rule, then install the service (uvicorn binds
-:80 directly via `CAP_NET_BIND_SERVICE` — no Caddy needed for HTTP):
+loopback `:8000`; Caddy — §7 — owns 80/443 and terminates TLS):
 
 ```bash
 # open 80/443 ABOVE the REJECT (find its line: `sudo iptables -L INPUT --line-numbers`)
@@ -126,8 +127,7 @@ Type=simple
 User=ubuntu
 WorkingDirectory=/opt/ais/ais-tracker/backend
 Environment=STATIC_DIR=/opt/ais/ais-tracker/frontend/dist
-ExecStart=/opt/ais/ais-tracker/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 80
-AmbientCapabilities=CAP_NET_BIND_SERVICE
+ExecStart=/opt/ais/ais-tracker/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --proxy-headers --forwarded-allow-ips 127.0.0.1
 Restart=always
 RestartSec=5
 
@@ -139,11 +139,12 @@ sudo systemctl enable --now ais
 
 # check
 systemctl is-active ais
-curl -s http://localhost/healthz
+curl -s http://localhost:8000/healthz
 ```
 
 The app reads `backend/.env` via pydantic (CWD = `WorkingDirectory`), so no
-`EnvironmentFile` is needed. Visit **http://YOUR_IP** — the full tracker loads.
+`EnvironmentFile` is needed. Once Caddy (§7) is up, visit **https://arguseyes.xyz**
+(or **http://YOUR_IP**) — the full tracker loads.
 
 ---
 
@@ -162,25 +163,38 @@ count. One command, ~15s.
 
 ---
 
-## 7. HTTPS (optional)
+## 7. HTTPS — Caddy + arguseyes.xyz (live)
 
-HTTP is fully functional (the live feed runs over same-origin `ws://`), but for a
-padlock + a real URL, point a domain — or a free
-[DuckDNS](https://www.duckdns.org) subdomain — at the IP, then put **Caddy** in
-front (move uvicorn back to `:8000` first — drop `--port 80` to `--port 8000` and
-the `CAP_NET_BIND_SERVICE` line):
+**arguseyes.xyz** (A records for `@` and `www` → the box IP) is fronted by
+**Caddy**, which auto-provisions Let's Encrypt certs and passes the WebSocket
+through. Install from Caddy's official apt repo (the Ubuntu archive one is
+ancient), then:
 
 ```bash
-sudo apt install -y caddy
 sudo tee /etc/caddy/Caddyfile >/dev/null <<'EOF'
-yourname.duckdns.org {
-    reverse_proxy localhost:8000
+# Canonical site — auto-HTTPS.
+arguseyes.xyz {
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:8000
+}
+
+# www → apex.
+www.arguseyes.xyz {
+    redir https://arguseyes.xyz{uri} permanent
+}
+
+# Raw-IP access stays on plain HTTP (no cert is possible for a bare IP).
+http://140.238.76.193 {
+    reverse_proxy 127.0.0.1:8000
 }
 EOF
-sudo systemctl restart caddy
+sudo systemctl enable --now caddy
 ```
 
-Caddy auto-provisions a Let's Encrypt cert and passes the WebSocket through.
+Certs are issued via HTTP-01 on :80, so issuance works even before 443 is
+reachable. Remember **both** firewalls: the box iptables (§5) *and* the OCI VCN
+security list need TCP 443 ingress — the VCN rule lives in the console under
+Networking → VCN → Security Lists.
 
 ---
 
