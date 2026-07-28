@@ -64,7 +64,9 @@ from .incidents.news import NewsSource
 from .incidents.social import SocialSource
 from .store import create_store
 from .store.aircraft import AircraftStore
+from .store.ferry import FerryStore
 from .store.fire import FireStore
+from .sources.ferries import FerrySource
 from .sources.fire import FireSource
 from .store.bus import BusStore
 from .store.train import TrainStore
@@ -277,6 +279,11 @@ async def lifespan(app: FastAPI):
     if fire_store is not None:
         await fire_store.start()
     app.state.fire_store = fire_store
+
+    ferry_store = FerryStore() if settings.enable_ferry else None
+    if ferry_store is not None:
+        await ferry_store.start()
+    app.state.ferry_store = ferry_store
     app.state.fire_complexes = []  # clustered + enriched, refreshed by a loop
     # Land domain: London buses (BODS SIRI-VM), fanned out on the same socket.
     bus_store = BusStore() if settings.enable_bus else None
@@ -356,6 +363,9 @@ async def lifespan(app: FastAPI):
     if fire_store is not None:
         # NASA FIRMS wildfire eye — idles (amber) until FIRMS_MAP_KEY is set.
         sources.append(FireSource(fire_store, settings))
+    if ferry_store is not None:
+        # Ferry service-status eye (CalMac + NorthLink) — keyless.
+        sources.append(FerrySource(ferry_store, settings))
     if bus_store is not None:
         sources.append(BodsSource(bus_store, settings))
     if train_store is not None:
@@ -601,6 +611,7 @@ async def healthz():
         "vessels": await app.state.store.count(),
         "aircraft": await app.state.air_store.count() if app.state.air_store else 0,
         "fires": await app.state.fire_store.count() if app.state.fire_store else 0,
+        "ferries": await app.state.ferry_store.count() if app.state.ferry_store else 0,
         "buses": await app.state.bus_store.count() if app.state.bus_store else 0,
         "trains": await app.state.train_store.count() if app.state.train_store else 0,
         "tube": await app.state.tube_store.count() if app.state.tube_store else 0,
@@ -817,6 +828,8 @@ async def feature_flags():
     flags["air"] = bool(app.state.settings.enable_air)
     # Wildfire layer available when FIRMS is enabled AND a map key is configured.
     flags["fire"] = bool(app.state.settings.enable_fire and app.state.settings.firms_map_key)
+    # Ferry service-status layer (CalMac + NorthLink) — keyless.
+    flags["ferry"] = bool(app.state.settings.enable_ferry)
     # London buses available when the BODS feed is enabled + keyed server-side.
     flags["bus"] = bool(app.state.settings.enable_bus and app.state.settings.bods_api_key)
     # London traffic cameras available when the TfL feed is enabled server-side.
@@ -919,6 +932,19 @@ async def aircraft_detail(hex: str):
         "info": info,
         "route": route,
     }
+
+
+@app.get("/api/ferries")
+async def list_ferries():
+    """Ferry routes with live service status (CalMac + NorthLink) — disrupted
+    routes first, then be-aware, then normal."""
+    store = app.state.ferry_store
+    if store is None:
+        raise HTTPException(404, "ferry feed disabled")
+    routes = await store.snapshot()
+    rank = {"disruptions": 0, "be_aware": 1, "normal": 2}
+    routes.sort(key=lambda r: (rank.get(r.status, 3), r.name))
+    return {"routes": [r.model_dump() for r in routes]}
 
 
 @app.get("/api/fire")

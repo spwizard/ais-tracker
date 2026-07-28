@@ -27,6 +27,7 @@ import type {
   Incident,
   FireDetection,
   FireComplex,
+  FerryRoute,
   Camera,
   DensityPoint,
   WeatherMeta,
@@ -43,6 +44,7 @@ import { buildTubeLayers, tubeColor } from "./tubeLayers";
 import { buildHotspotLayers } from "./hotspotLayers";
 import { buildIncidentLayers } from "./incidentLayers";
 import { buildFireLayers } from "./fireLayers";
+import { buildFerryLayers } from "./ferryLayers";
 import type { HeatPoint, Hotspot } from "@/hooks/useDelayHotspots";
 import { ScatterplotLayer, TextLayer } from "@deck.gl/layers";
 import { buildReplayLayers, type TrailMode, type ColorMode } from "./replayLayers";
@@ -179,6 +181,11 @@ interface MapViewProps {
   // mark industrial heat sources slate. Clicking a marker opens its detail.
   fireComplexes: FireComplex[];
   onSelectFireComplex: (c: FireComplex | null) => void;
+  // Ferry service-status layer (CalMac + NorthLink route lines).
+  ferryRoutes: FerryRoute[];
+  showFerry: boolean;
+  selectedFerryId: string | null;
+  onSelectFerry: (r: FerryRoute | null) => void;
   // The camera the selected bus is heading toward next — pulse a ring on it.
   nextCameraPos: [number, number] | null;
 }
@@ -273,6 +280,10 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
     onSelectFire,
     fireComplexes,
     onSelectFireComplex,
+    ferryRoutes,
+    showFerry,
+    selectedFerryId,
+    onSelectFerry,
     nextCameraPos,
   } = props;
 
@@ -618,6 +629,16 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
             onSelectComplex: onSelectFireComplex,
           })
         : []),
+      // Ferry routes coloured by live service status — under the vessels so
+      // the ships sail over their own route lines.
+      ...(showFerry
+        ? buildFerryLayers({
+            routes: ferryRoutes,
+            zoom,
+            selectedId: selectedFerryId,
+            onSelect: onSelectFerry,
+          })
+        : []),
       // Pulsing ring on the camera the selected bus is heading toward next.
       ...(nextCameraPos ? buildNextCameraRing(nextCameraPos, currentTime) : []),
     ],
@@ -669,6 +690,10 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
       onSelectFire,
       fireComplexes,
       onSelectFireComplex,
+      ferryRoutes,
+      showFerry,
+      selectedFerryId,
+      onSelectFerry,
       nextCameraPos,
       densityMode,
       drawing,
@@ -773,6 +798,8 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
               : object && (object as TrackedBus).route !== undefined &&
                   (object as TrackedBus).operator !== undefined
                 ? buildBusTooltip(object as TrackedBus)
+                : object && Array.isArray((object as FerryRoute).ports)
+                  ? buildFerryTooltip(object as FerryRoute)
                 : object && (object as FireComplex).kind === "industrial"
                   ? buildIndustrialTooltip(object as FireComplex)
                 : object && (object as FireDetection).frp !== undefined
@@ -1012,6 +1039,24 @@ function buildFireTooltip(f: FireDetection) {
           Wildfire · ${Math.round(f.frp)} MW
         </div>
         <div style="opacity:.75;font-size:11px">${escapeHtml(f.satellite)} · ${escapeHtml(f.instrument)} · tap for detail</div>
+      </div>`,
+    style: tooltipStyle(),
+  };
+}
+
+function buildFerryTooltip(r: FerryRoute) {
+  const color =
+    r.status === "disruptions" ? "#f43f5e" : r.status === "be_aware" ? "#fbbf24" : "#34d399";
+  const label =
+    r.status === "disruptions" ? "Disrupted" : r.status === "be_aware" ? "Be aware" : "Sailing normally";
+  return {
+    html: `
+      <div style="font-family:Inter,system-ui,sans-serif;min-width:150px;max-width:230px">
+        <div style="display:flex;align-items:center;gap:6px;font-weight:600;margin-bottom:2px">
+          <span style="width:10px;height:10px;border-radius:9999px;background:${color}"></span>
+          ${escapeHtml(r.name)}
+        </div>
+        <div style="opacity:.75;font-size:11px">${escapeHtml(r.operator)} · ${label} · tap for detail</div>
       </div>`,
     style: tooltipStyle(),
   };

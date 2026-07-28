@@ -36,10 +36,12 @@ import { IncidentCard } from "@/panels/IncidentCard";
 import { IncidentsPanel } from "@/panels/IncidentsPanel";
 import { WildfiresPanel } from "@/panels/WildfiresPanel";
 import { useFireComplexes } from "@/hooks/useFireComplexes";
+import { FerriesPanel } from "@/panels/FerriesPanel";
+import { useFerries } from "@/hooks/useFerries";
 import { useTubeNetwork } from "@/hooks/useTubeNetwork";
 import { useCameraWall } from "@/hooks/useCameraWall";
 import { nearbyCameras, nextCameraAhead } from "@/lib/nearbyCameras";
-import type { Camera, TrackedBus, TrackedTrain, TubeTrain, Incident, FireDetection, FireComplex } from "@/types";
+import type { Camera, TrackedBus, TrackedTrain, TubeTrain, Incident, FireDetection, FireComplex, FerryRoute } from "@/types";
 import { MapControls } from "@/panels/MapControls";
 import { ZonesPanel } from "@/panels/ZonesPanel";
 import { DrawToolbar } from "@/panels/DrawToolbar";
@@ -92,6 +94,13 @@ const SEARCH_TRACK_COLOR: [number, number, number] = [180, 210, 255];
 const NO_INCIDENTS: Incident[] = [];
 const NO_FIRES: FireDetection[] = [];
 const NO_COMPLEXES: FireComplex[] = [];
+const NO_FERRIES: FerryRoute[] = [];
+
+// The URL as the page arrived. The layer-sync effect rewrites location.search
+// soon after mount, and in dev StrictMode re-runs the loader effect AFTER that
+// rewrite — reading live location there would apply the clobbered URL and drop
+// layers. Deep links must always parse this frozen copy.
+const INITIAL_SEARCH = typeof window !== "undefined" ? window.location.search : "";
 
 // Shareable ?region= jump targets (e.g. ?region=scotland, composable with
 // ?layers=). Slugs are stable API — don't rename casually.
@@ -148,6 +157,10 @@ export default function App() {
   const fireAvailable = useFlag("fire");
   const [selectedFireId, setSelectedFireId] = useState<string | null>(null);
   const fireComplexes = useFireComplexes(showFire);
+  const [showFerry, setShowFerry] = useState(false); // ferry service-status layer
+  const ferryAvailable = useFlag("ferry");
+  const [selectedFerryId, setSelectedFerryId] = useState<string | null>(null);
+  const ferryRoutes = useFerries(showFerry);
   const [selectedIncidentId, setSelectedIncidentId] = useState<string | null>(null);
   const tubeNetwork = useTubeNetwork(showTube);
   const [selectedBusId, setSelectedBusId] = useState<string | null>(null);
@@ -452,6 +465,23 @@ export default function App() {
     selectFire(c);
   };
 
+  const selectedFerry = useMemo(
+    () => ferryRoutes.find((r) => r.id === selectedFerryId) ?? null,
+    [ferryRoutes, selectedFerryId],
+  );
+  const selectFerry = (r: FerryRoute) => {
+    setSelectedFerryId(r.id);
+    // Frame the whole route: fly to its midpoint, zoomed to fit the crossing.
+    const lat = r.ports.reduce((s, p) => s + p.lat, 0) / r.ports.length;
+    const lon = r.ports.reduce((s, p) => s + p.lon, 0) / r.ports.length;
+    mapRef.current?.flyTo({ longitude: lon, latitude: lat, zoom: 8.5 });
+  };
+  const selectFerryOnMap = (r: FerryRoute | null) => {
+    if (!r) return;
+    setOpen("ferries", true);
+    setSelectedFerryId(r.id); // already looking at it — no fly-to jolt
+  };
+
   // Fire focus: light up only wildfires and quiet every other layer, so the
   // fire picture is clean. Reused by the toggle and by a shared ?layers=fire URL.
   const focusFireView = useCallback((fly = true) => {
@@ -475,6 +505,7 @@ export default function App() {
     vessels: [showVessels, setShowVessels],
     air: [showAir, setShowAir],
     fire: [showFire, setShowFire],
+    ferry: [showFerry, setShowFerry],
     incidents: [showIncidents, setShowIncidents],
     bus: [showBus, setShowBus],
     tube: [showTube, setShowTube],
@@ -485,7 +516,7 @@ export default function App() {
   // On load: apply the ?layers= set exactly (listed on, everything else off),
   // and honour a ?region= jump (shareable links like ?region=scotland).
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
+    const params = new URLSearchParams(INITIAL_SEARCH);
     const raw = params.get("layers");
     if (raw !== null) {
       const want = new Set(raw.split(",").map((s) => s.trim()).filter(Boolean));
@@ -513,7 +544,7 @@ export default function App() {
     const qs = p.toString();
     window.history.replaceState(null, "", qs ? `${window.location.pathname}?${qs}` : window.location.pathname);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showVessels, showAir, showFire, showIncidents, showBus, showTube, showTrain, showCameras]);
+  }, [showVessels, showAir, showFire, showFerry, showIncidents, showBus, showTube, showTrain, showCameras]);
 
   const selectedIncident = useMemo(
     () => (selectedIncidentId ? incidentsRef.current.get(selectedIncidentId) ?? null : null),
@@ -1142,6 +1173,10 @@ export default function App() {
         onSelectFire={selectFireOnMap}
         fireComplexes={showFire ? fireComplexes : NO_COMPLEXES}
         onSelectFireComplex={selectComplexOnMap}
+        ferryRoutes={showFerry ? ferryRoutes : NO_FERRIES}
+        showFerry={showFerry}
+        selectedFerryId={selectedFerryId}
+        onSelectFerry={selectFerryOnMap}
         nextCameraPos={nextCameraPos}
       />
 
@@ -1172,6 +1207,7 @@ export default function App() {
             londonpulse: panels.londonpulse.open,
             incidents: panels.incidents.open,
             wildfires: panels.wildfires.open,
+            ferries: panels.ferries.open,
             zones: panels.zones.open,
             analyst: panels.analyst.open,
           }}
@@ -1260,6 +1296,13 @@ export default function App() {
               }
             }}
             fireAvailable={fireAvailable}
+            showFerry={showFerry}
+            onToggleFerry={(v) => {
+              setShowFerry(v);
+              setOpen("ferries", v);
+              if (!v) setSelectedFerryId(null);
+            }}
+            ferryAvailable={ferryAvailable}
             showBus={showBus}
             onToggleBus={toggleLondonLayer(setShowBus)}
             showTrain={showTrain}
@@ -1541,6 +1584,15 @@ export default function App() {
             selected={selectedFire}
             onSelect={selectFire}
             onBack={() => setSelectedFireId(null)}
+          />
+        )}
+        {panels.ferries.open && (
+          <FerriesPanel
+            chrome={chromeFor("ferries")}
+            routes={ferryRoutes}
+            selected={selectedFerry}
+            onSelect={selectFerry}
+            onBack={() => setSelectedFerryId(null)}
           />
         )}
         <AlertToasts

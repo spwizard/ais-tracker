@@ -294,6 +294,25 @@ export interface Aircraft {
   ts: number; // last update, epoch seconds
 }
 
+export interface FerryPort {
+  name: string;
+  lat: number;
+  lon: number;
+}
+
+/** A ferry route with live service status (CalMac / NorthLink). The vessels
+ *  themselves are on the AIS layer — this is whether the service is running. */
+export interface FerryRoute {
+  id: string;
+  operator: "CalMac" | "NorthLink";
+  name: string;
+  status: "normal" | "be_aware" | "disruptions";
+  title: string | null;
+  detail: string | null;
+  ports: FerryPort[];
+  updated: number;
+}
+
 /** One satellite wildfire detection (NASA FIRMS). A fixed hot pixel from a
  *  single overpass — no movement. Keyed by `id`. */
 export interface FireDetection {

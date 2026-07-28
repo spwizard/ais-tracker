@@ -21,6 +21,7 @@ import {
   Landmark,
   TriangleAlert,
   Eye,
+  Ship,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
@@ -49,6 +50,9 @@ interface LayerControlsProps {
   showFire: boolean;
   onToggleFire: (v: boolean) => void;
   fireAvailable: boolean;
+  showFerry: boolean;
+  onToggleFerry: (v: boolean) => void;
+  ferryAvailable: boolean;
   showBus: boolean;
   showTrain: boolean;
   showTube: boolean;
@@ -173,6 +177,9 @@ export function LayerControls({
   showFire,
   onToggleFire,
   fireAvailable,
+  showFerry,
+  onToggleFerry,
+  ferryAvailable,
   showBus,
   showTrain,
   showTube,
@@ -220,6 +227,15 @@ export function LayerControls({
               Re-enable by restoring this row (state + plumbing are all intact):
           <Row icon={Route} label="Vessel trails" checked={showTrails} onChange={onToggleTrails} />
           */}
+          {ferryAvailable && (
+            <Row
+              icon={Ship}
+              label="Ferry status"
+              hint="Scottish ferry routes (CalMac + NorthLink) coloured by live service status — the ships themselves sail on the vessel layer."
+              checked={showFerry}
+              onChange={onToggleFerry}
+            />
+          )}
           <Row
             icon={Flame}
             label="Density heatmap"

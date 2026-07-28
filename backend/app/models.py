@@ -205,6 +205,28 @@ class TubeTrain(BaseModel):
     ts: float = 0.0  # last update (epoch seconds)
 
 
+class FerryPort(BaseModel):
+    name: str
+    lat: float
+    lon: float
+
+
+class FerryRoute(BaseModel):
+    """One ferry route with live service status — the sea-domain service layer
+    (the vessels themselves are already on the AIS layer; this is whether the
+    *service* is running). CalMac via their GraphQL API; NorthLink via notices.
+    """
+
+    id: str  # operator-prefixed stable key, e.g. "calmac:5"
+    operator: str  # "CalMac" | "NorthLink"
+    name: str  # e.g. "Ullapool - Stornoway"
+    status: str  # "normal" | "be_aware" | "disruptions"
+    title: Optional[str] = None  # headline of the current disruption notice
+    detail: Optional[str] = None  # notice text (plain)
+    ports: list[FerryPort] = []
+    updated: float = 0.0
+
+
 class Incident(BaseModel):
     """A located, timestamped thing-happening — the unifying entity of the
     Argus incident spine. Every eye (official feeds, inference, news/social)

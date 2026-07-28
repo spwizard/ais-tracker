@@ -58,6 +58,9 @@ class Settings(BaseSettings):
     def air_regions(self) -> list[tuple[float, float, int]]:
         return [tuple(r) for r in json.loads(self.air_regions_raw)]
 
+    # --- Ferries (CalMac GraphQL + NorthLink notices — keyless) -------------
+    enable_ferry: bool = Field(default=True, alias="ENABLE_FERRY")
+
     # --- Wildfires (NASA FIRMS — free map key, near-real-time) --------------
     enable_fire: bool = Field(default=True, alias="ENABLE_FIRE")
     firms_url: str = Field(
