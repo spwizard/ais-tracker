@@ -58,6 +58,7 @@ from .sources import AdsbLolSource, BodsSource, create_sources
 from .sources.darwin import DarwinSource
 from .sources.rail_sim import SimRailSource
 from .sources.tube import TubeSource
+from .sources.scot_road import ScotRoadSource
 from .sources.tfl_road import TflRoadSource
 from .incidents.news import NewsSource
 from .incidents.social import SocialSource
@@ -368,6 +369,9 @@ async def lifespan(app: FastAPI):
     if incident_store is not None:
         app.state.tfl_road = TflRoadSource(incident_store, settings)
         sources.append(app.state.tfl_road)
+        if settings.enable_scot_road:
+            # Traffic Scotland eye — Scottish trunk roads on the same spine.
+            sources.append(ScotRoadSource(incident_store, settings))
         if settings.enable_news and settings.anthropic_api_key:
             sources.append(NewsSource(incident_store, settings))
         if settings.enable_social and settings.anthropic_api_key:

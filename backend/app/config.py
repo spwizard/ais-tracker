@@ -120,6 +120,9 @@ class Settings(BaseSettings):
 
     # --- Incidents: Argus spine (TfL road disruptions + future eyes) --------
     enable_incidents: bool = Field(default=True, alias="ENABLE_INCIDENTS")
+    # Traffic Scotland road eye — Scottish trunk-road incidents, delaying
+    # roadworks, snow gates and bridge restrictions (keyless JSON).
+    enable_scot_road: bool = Field(default=True, alias="ENABLE_SCOT_ROAD")
     # Bus-swarm inference is off by default: positional stall-detection can't
     # distinguish a genuine blockage from baseline bus-corridor congestion
     # without scheduled-route (diversion) data. Kept for when that lands.
