@@ -93,6 +93,14 @@ const NO_INCIDENTS: Incident[] = [];
 const NO_FIRES: FireDetection[] = [];
 const NO_COMPLEXES: FireComplex[] = [];
 
+// Shareable ?region= jump targets (e.g. ?region=scotland, composable with
+// ?layers=). Slugs are stable API — don't rename casually.
+const REGION_VIEWS: Record<string, { longitude: number; latitude: number; zoom: number }> = {
+  scotland: { longitude: -4.3, latitude: 56.8, zoom: 6.3 },
+  london: { longitude: -0.1, latitude: 51.5, zoom: 10 },
+  channel: { longitude: -1.0, latitude: 50.2, zoom: 7.2 },
+};
+
 export default function App() {
   const { vesselsRef, aircraftRef, busesRef, trainsRef, tubeRef, incidentsRef, firesRef, version, fireVersion, incidentVersion, viewers, status, events, riskEvents, flagged, geofenceSync, setTrailGate } =
     useVesselsSocket();
@@ -474,9 +482,11 @@ export default function App() {
     cameras: [showCameras, setShowCameras],
   };
   const urlApplied = useRef(false);
-  // On load: apply the ?layers= set exactly (listed on, everything else off).
+  // On load: apply the ?layers= set exactly (listed on, everything else off),
+  // and honour a ?region= jump (shareable links like ?region=scotland).
   useEffect(() => {
-    const raw = new URLSearchParams(window.location.search).get("layers");
+    const params = new URLSearchParams(window.location.search);
+    const raw = params.get("layers");
     if (raw !== null) {
       const want = new Set(raw.split(",").map((s) => s.trim()).filter(Boolean));
       if (want.has("fire")) {
@@ -487,6 +497,9 @@ export default function App() {
         if (want.has("incidents")) setOpen("incidents", true);
       }
     }
+    const region = REGION_VIEWS[params.get("region") ?? ""];
+    // A region jump wins over the fire view's default framing.
+    if (region) setTimeout(() => mapRef.current?.flyTo(region), 900);
     urlApplied.current = true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

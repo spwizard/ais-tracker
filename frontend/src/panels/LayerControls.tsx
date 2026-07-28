@@ -86,6 +86,7 @@ const REGIONS: { label: string; target: ViewTarget }[] = [
   { label: "Thames / Dover", target: { longitude: 1.3, latitude: 51.2, zoom: 8 } },
   { label: "Solent", target: { longitude: -1.3, latitude: 50.78, zoom: 9.5 } },
   { label: "Bristol Channel", target: { longitude: -3.6, latitude: 51.4, zoom: 8 } },
+  { label: "Scotland", target: { longitude: -4.3, latitude: 56.8, zoom: 6.3 } },
   // Digitraffic (Fintraffic) coverage — Finnish / Baltic waters.
   { label: "Gulf of Finland", target: { longitude: 25.0, latitude: 59.8, zoom: 7 } },
   // Kystverket coverage — Norwegian coast.

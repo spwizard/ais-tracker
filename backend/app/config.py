@@ -43,11 +43,11 @@ class Settings(BaseSettings):
     adsb_url: str = Field(default="https://api.adsb.lol", alias="ADSB_URL")
     # Poll regions as JSON: a list of [lat, lon, radius_nm] circles (adsb.lol max
     # 250 nm each). Defaults cover the same footprint as the AIS feeds — UK/
-    # Channel, the Norwegian coast/Skagerrak, and the Baltic/Gulf of Finland — so
-    # aircraft appear wherever the vessels do.
+    # Channel, Scotland, the Norwegian coast/Skagerrak, and the Baltic/Gulf of
+    # Finland — so aircraft appear wherever the vessels do.
     air_regions_raw: str = Field(
         default=json.dumps(
-            [[50.5, 0.0, 250], [59.5, 7.0, 250], [59.5, 23.0, 250]]
+            [[50.5, 0.0, 250], [57.0, -4.5, 250], [59.5, 7.0, 250], [59.5, 23.0, 250]]
         ),
         alias="AIR_REGIONS",
     )
