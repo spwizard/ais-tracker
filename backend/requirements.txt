@@ -18,3 +18,4 @@ numpy>=1.26
 Pillow>=10.0
 aiokafka>=0.11
 certifi>=2024.0
+gtfs-realtime-bindings

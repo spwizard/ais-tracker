@@ -184,14 +184,18 @@ export function MapLegend({
     );
   }
 
-  // London buses: operator colours (matches busLayers).
+  // Buses & coaches: operator colours (matches busLayers).
   if (showBuses && !replayMode) {
     sections.push(
-      <Section key="buses" label="Buses (London)">
+      <Section key="buses" label="Buses & coaches">
         <div className="space-y-1">
           <span className="flex items-center gap-1.5">
             <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#e22d26]" />
             <span className="text-[11px] text-foreground/90">TfL bus</span>
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#34d399]" />
+            <span className="text-[11px] text-foreground/90">Ember coach</span>
           </span>
           <span className="flex items-center gap-1.5">
             <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#fbbf24]" />

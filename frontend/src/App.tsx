@@ -1315,7 +1315,7 @@ export default function App() {
             onToggleHazards={setShowHazards}
             hazardAvailable={hazardAvailable}
             showBus={showBus}
-            onToggleBus={toggleLondonLayer(setShowBus)}
+            onToggleBus={setShowBus} // no London auto-fly: buses now span Ember coaches Scotland-wide
             showTrain={showTrain}
             onToggleTrain={setShowTrain}
             trainAvailable={trainAvailable}

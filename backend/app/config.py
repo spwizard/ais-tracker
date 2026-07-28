@@ -99,6 +99,9 @@ class Settings(BaseSettings):
 
     # --- Land: London buses (Bus Open Data Service SIRI-VM — free, needs key) --
     enable_bus: bool = Field(default=False, alias="ENABLE_BUS")
+    # Ember coaches (Scottish intercity, open GTFS-RT — keyless). Rides the
+    # same bus domain as BODS.
+    enable_ember: bool = Field(default=True, alias="ENABLE_EMBER")
     bods_api_key: str = Field(default="", alias="BODS_API_KEY")
     bods_url: str = Field(
         default="https://data.bus-data.dft.gov.uk/api/v1", alias="BODS_URL"

@@ -67,6 +67,7 @@ from .store.aircraft import AircraftStore
 from .store.ferry import FerryStore
 from .store.fire import FireStore
 from .store.hazard import HazardStore
+from .sources.ember import EmberSource
 from .sources.ferries import FerrySource
 from .sources.fire import FireSource
 from .sources.hazards import HazardSource
@@ -293,7 +294,7 @@ async def lifespan(app: FastAPI):
     app.state.hazard_store = hazard_store
     app.state.fire_complexes = []  # clustered + enriched, refreshed by a loop
     # Land domain: London buses (BODS SIRI-VM), fanned out on the same socket.
-    bus_store = BusStore() if settings.enable_bus else None
+    bus_store = BusStore() if (settings.enable_bus or settings.enable_ember) else None
     if bus_store is not None:
         await bus_store.start()
     app.state.bus_store = bus_store
@@ -377,7 +378,11 @@ async def lifespan(app: FastAPI):
         # Hazards eye (SEPA floods + Met Office warnings + BGS quakes).
         sources.append(HazardSource(hazard_store, settings))
     if bus_store is not None:
-        sources.append(BodsSource(bus_store, settings))
+        if settings.enable_bus:
+            sources.append(BodsSource(bus_store, settings))
+        if settings.enable_ember:
+            # Ember coaches (Scotland) — open GTFS-RT, same bus domain.
+            sources.append(EmberSource(bus_store, settings))
     if train_store is not None:
         # Sim feed for the Tier-1 prototype; Darwin takes over once configured.
         if settings.darwin_bootstrap and settings.darwin_user:
@@ -844,7 +849,10 @@ async def feature_flags():
     # Hazards layer (SEPA floods + Met Office warnings + BGS quakes).
     flags["hazard"] = bool(app.state.settings.enable_hazards)
     # London buses available when the BODS feed is enabled + keyed server-side.
-    flags["bus"] = bool(app.state.settings.enable_bus and app.state.settings.bods_api_key)
+    flags["bus"] = bool(
+        (app.state.settings.enable_bus and app.state.settings.bods_api_key)
+        or app.state.settings.enable_ember
+    )
     # London traffic cameras available when the TfL feed is enabled server-side.
     flags["cameras"] = bool(app.state.settings.enable_cameras)
     # GB trains: hidden until the real feed exists — the layer only surfaces

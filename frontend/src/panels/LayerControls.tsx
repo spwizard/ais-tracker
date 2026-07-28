@@ -320,7 +320,7 @@ export function LayerControls({
             {busAvailable && (
               <Row
                 icon={Bus}
-                label="Buses (London)"
+                label="Buses & coaches"
                 hint="Live TfL buses — zoom into London, then click one to follow it."
                 checked={showBus}
                 onChange={onToggleBus}
