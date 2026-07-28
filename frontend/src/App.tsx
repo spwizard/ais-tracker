@@ -38,10 +38,11 @@ import { WildfiresPanel } from "@/panels/WildfiresPanel";
 import { useFireComplexes } from "@/hooks/useFireComplexes";
 import { FerriesPanel } from "@/panels/FerriesPanel";
 import { useFerries } from "@/hooks/useFerries";
+import { useHazards } from "@/hooks/useHazards";
 import { useTubeNetwork } from "@/hooks/useTubeNetwork";
 import { useCameraWall } from "@/hooks/useCameraWall";
 import { nearbyCameras, nextCameraAhead } from "@/lib/nearbyCameras";
-import type { Camera, TrackedBus, TrackedTrain, TubeTrain, Incident, FireDetection, FireComplex, FerryRoute } from "@/types";
+import type { Camera, TrackedBus, TrackedTrain, TubeTrain, Incident, FireDetection, FireComplex, FerryRoute, Hazard } from "@/types";
 import { MapControls } from "@/panels/MapControls";
 import { ZonesPanel } from "@/panels/ZonesPanel";
 import { DrawToolbar } from "@/panels/DrawToolbar";
@@ -95,6 +96,7 @@ const NO_INCIDENTS: Incident[] = [];
 const NO_FIRES: FireDetection[] = [];
 const NO_COMPLEXES: FireComplex[] = [];
 const NO_FERRIES: FerryRoute[] = [];
+const NO_HAZARDS: Hazard[] = [];
 
 // The URL as the page arrived. The layer-sync effect rewrites location.search
 // soon after mount, and in dev StrictMode re-runs the loader effect AFTER that
@@ -161,6 +163,9 @@ export default function App() {
   const ferryAvailable = useFlag("ferry");
   const [selectedFerryId, setSelectedFerryId] = useState<string | null>(null);
   const ferryRoutes = useFerries(showFerry);
+  const [showHazards, setShowHazards] = useState(false); // floods/weather/quakes
+  const hazardAvailable = useFlag("hazard");
+  const hazards = useHazards(showHazards);
   const [selectedIncidentId, setSelectedIncidentId] = useState<string | null>(null);
   const tubeNetwork = useTubeNetwork(showTube);
   const [selectedBusId, setSelectedBusId] = useState<string | null>(null);
@@ -506,6 +511,7 @@ export default function App() {
     air: [showAir, setShowAir],
     fire: [showFire, setShowFire],
     ferry: [showFerry, setShowFerry],
+    hazards: [showHazards, setShowHazards],
     incidents: [showIncidents, setShowIncidents],
     bus: [showBus, setShowBus],
     tube: [showTube, setShowTube],
@@ -544,7 +550,7 @@ export default function App() {
     const qs = p.toString();
     window.history.replaceState(null, "", qs ? `${window.location.pathname}?${qs}` : window.location.pathname);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showVessels, showAir, showFire, showFerry, showIncidents, showBus, showTube, showTrain, showCameras]);
+  }, [showVessels, showAir, showFire, showFerry, showHazards, showIncidents, showBus, showTube, showTrain, showCameras]);
 
   const selectedIncident = useMemo(
     () => (selectedIncidentId ? incidentsRef.current.get(selectedIncidentId) ?? null : null),
@@ -1177,6 +1183,8 @@ export default function App() {
         showFerry={showFerry}
         selectedFerryId={selectedFerryId}
         onSelectFerry={selectFerryOnMap}
+        hazards={showHazards ? hazards : NO_HAZARDS}
+        showHazards={showHazards}
         nextCameraPos={nextCameraPos}
       />
 
@@ -1303,6 +1311,9 @@ export default function App() {
               if (!v) setSelectedFerryId(null);
             }}
             ferryAvailable={ferryAvailable}
+            showHazards={showHazards}
+            onToggleHazards={setShowHazards}
+            hazardAvailable={hazardAvailable}
             showBus={showBus}
             onToggleBus={toggleLondonLayer(setShowBus)}
             showTrain={showTrain}

@@ -28,6 +28,7 @@ import type {
   FireDetection,
   FireComplex,
   FerryRoute,
+  Hazard,
   Camera,
   DensityPoint,
   WeatherMeta,
@@ -45,6 +46,7 @@ import { buildHotspotLayers } from "./hotspotLayers";
 import { buildIncidentLayers } from "./incidentLayers";
 import { buildFireLayers } from "./fireLayers";
 import { buildFerryLayers } from "./ferryLayers";
+import { buildHazardLayers } from "./hazardLayers";
 import type { HeatPoint, Hotspot } from "@/hooks/useDelayHotspots";
 import { ScatterplotLayer, TextLayer } from "@deck.gl/layers";
 import { buildReplayLayers, type TrailMode, type ColorMode } from "./replayLayers";
@@ -186,6 +188,9 @@ interface MapViewProps {
   showFerry: boolean;
   selectedFerryId: string | null;
   onSelectFerry: (r: FerryRoute | null) => void;
+  // Hazards layer (flood polygons, weather warnings, quakes).
+  hazards: Hazard[];
+  showHazards: boolean;
   // The camera the selected bus is heading toward next — pulse a ring on it.
   nextCameraPos: [number, number] | null;
 }
@@ -284,6 +289,8 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
     showFerry,
     selectedFerryId,
     onSelectFerry,
+    hazards,
+    showHazards,
     nextCameraPos,
   } = props;
 
@@ -639,6 +646,8 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
             onSelect: onSelectFerry,
           })
         : []),
+      // Environmental hazards — flood polygons, weather warnings, quakes.
+      ...(showHazards ? buildHazardLayers({ hazards, zoom }) : []),
       // Pulsing ring on the camera the selected bus is heading toward next.
       ...(nextCameraPos ? buildNextCameraRing(nextCameraPos, currentTime) : []),
     ],
@@ -694,6 +703,8 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
       showFerry,
       selectedFerryId,
       onSelectFerry,
+      hazards,
+      showHazards,
       nextCameraPos,
       densityMode,
       drawing,
@@ -798,6 +809,8 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
               : object && (object as TrackedBus).route !== undefined &&
                   (object as TrackedBus).operator !== undefined
                 ? buildBusTooltip(object as TrackedBus)
+                : object && isHazardPick(object)
+                  ? buildHazardTooltip(unwrapHazard(object))
                 : object && Array.isArray((object as FerryRoute).ports)
                   ? buildFerryTooltip(object as FerryRoute)
                 : object && (object as FireComplex).kind === "industrial"
@@ -1039,6 +1052,37 @@ function buildFireTooltip(f: FireDetection) {
           Wildfire · ${Math.round(f.frp)} MW
         </div>
         <div style="opacity:.75;font-size:11px">${escapeHtml(f.satellite)} · ${escapeHtml(f.instrument)} · tap for detail</div>
+      </div>`,
+    style: tooltipStyle(),
+  };
+}
+
+const _HAZARD_KINDS = new Set(["flood", "weather", "quake"]);
+
+/** Hazards arrive two ways: direct objects from point layers, or GeoJSON
+ *  features (hazard in `.properties`) from the flood-polygon layer. */
+function isHazardPick(object: unknown): boolean {
+  const o = object as { kind?: string; properties?: { kind?: string } };
+  return _HAZARD_KINDS.has(o.kind ?? o.properties?.kind ?? "");
+}
+
+function unwrapHazard(object: unknown): Hazard {
+  const o = object as Hazard & { properties?: Hazard };
+  return _HAZARD_KINDS.has(o.kind) ? o : (o.properties as Hazard);
+}
+
+function buildHazardTooltip(h: Hazard) {
+  const color =
+    h.severity === "serious" ? "#f43f5e" : h.severity === "moderate" ? "#fb923c" : "#facc15";
+  const sub = [h.region, h.detail?.slice(0, 120)].filter(Boolean).join(" · ");
+  return {
+    html: `
+      <div style="font-family:Inter,system-ui,sans-serif;min-width:150px;max-width:250px">
+        <div style="display:flex;align-items:center;gap:6px;font-weight:600;margin-bottom:2px">
+          <span style="width:10px;height:10px;border-radius:9999px;background:${color}"></span>
+          ${escapeHtml(h.title)}
+        </div>
+        <div style="opacity:.75;font-size:11px">${escapeHtml(sub)}</div>
       </div>`,
     style: tooltipStyle(),
   };

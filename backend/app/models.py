@@ -227,6 +227,28 @@ class FerryRoute(BaseModel):
     updated: float = 0.0
 
 
+class Hazard(BaseModel):
+    """An environmental hazard in force — flood warning, severe-weather warning
+    or earthquake. Mostly an empty layer (which is the good news); severity is
+    normalised so all three kinds share one visual language.
+    """
+
+    id: str  # source-prefixed stable key, e.g. "quake:20260728030953"
+    kind: str  # "flood" | "weather" | "quake"
+    severity: str  # minor | moderate | serious (normalised)
+    title: str
+    detail: Optional[str] = None
+    region: Optional[str] = None
+    lat: float
+    lon: float
+    # GeoJSON geometry for area hazards (flood-warning polygons); points omit it.
+    geometry: Optional[dict] = None
+    url: Optional[str] = None
+    magnitude: Optional[float] = None  # quakes only
+    ts: float = 0.0  # event/issue time (epoch)
+    updated: float = 0.0
+
+
 class Incident(BaseModel):
     """A located, timestamped thing-happening — the unifying entity of the
     Argus incident spine. Every eye (official feeds, inference, news/social)

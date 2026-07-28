@@ -53,6 +53,9 @@ interface LayerControlsProps {
   showFerry: boolean;
   onToggleFerry: (v: boolean) => void;
   ferryAvailable: boolean;
+  showHazards: boolean;
+  onToggleHazards: (v: boolean) => void;
+  hazardAvailable: boolean;
   showBus: boolean;
   showTrain: boolean;
   showTube: boolean;
@@ -180,6 +183,9 @@ export function LayerControls({
   showFerry,
   onToggleFerry,
   ferryAvailable,
+  showHazards,
+  onToggleHazards,
+  hazardAvailable,
   showBus,
   showTrain,
   showTube,
@@ -268,15 +274,26 @@ export function LayerControls({
           </Section>
         )}
 
-        {fireAvailable && (
-          <Section title="Fire">
-            <Row
-              icon={Flame}
-              label="Wildfires (NASA FIRMS)"
-              hint="Live satellite fire detections over Iberia & France, glowing by intensity (fire radiative power). Near-real-time from VIIRS."
-              checked={showFire}
-              onChange={onToggleFire}
-            />
+        {(fireAvailable || hazardAvailable) && (
+          <Section title="Hazards">
+            {fireAvailable && (
+              <Row
+                icon={Flame}
+                label="Wildfires (NASA FIRMS)"
+                hint="Live satellite fire detections over Iberia & France, glowing by intensity (fire radiative power). Near-real-time from VIIRS."
+                checked={showFire}
+                onChange={onToggleFire}
+              />
+            )}
+            {hazardAvailable && (
+              <Row
+                icon={TriangleAlert}
+                label="Floods · weather · quakes"
+                hint="Flood warnings in force (SEPA), severe-weather warnings (Met Office) and recent earthquakes (BGS). Usually empty — that's the good news."
+                checked={showHazards}
+                onChange={onToggleHazards}
+              />
+            )}
           </Section>
         )}
 

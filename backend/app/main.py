@@ -66,8 +66,10 @@ from .store import create_store
 from .store.aircraft import AircraftStore
 from .store.ferry import FerryStore
 from .store.fire import FireStore
+from .store.hazard import HazardStore
 from .sources.ferries import FerrySource
 from .sources.fire import FireSource
+from .sources.hazards import HazardSource
 from .store.bus import BusStore
 from .store.train import TrainStore
 from .store.tube import TubeStore
@@ -284,6 +286,11 @@ async def lifespan(app: FastAPI):
     if ferry_store is not None:
         await ferry_store.start()
     app.state.ferry_store = ferry_store
+
+    hazard_store = HazardStore() if settings.enable_hazards else None
+    if hazard_store is not None:
+        await hazard_store.start()
+    app.state.hazard_store = hazard_store
     app.state.fire_complexes = []  # clustered + enriched, refreshed by a loop
     # Land domain: London buses (BODS SIRI-VM), fanned out on the same socket.
     bus_store = BusStore() if settings.enable_bus else None
@@ -366,6 +373,9 @@ async def lifespan(app: FastAPI):
     if ferry_store is not None:
         # Ferry service-status eye (CalMac + NorthLink) — keyless.
         sources.append(FerrySource(ferry_store, settings))
+    if hazard_store is not None:
+        # Hazards eye (SEPA floods + Met Office warnings + BGS quakes).
+        sources.append(HazardSource(hazard_store, settings))
     if bus_store is not None:
         sources.append(BodsSource(bus_store, settings))
     if train_store is not None:
@@ -612,6 +622,7 @@ async def healthz():
         "aircraft": await app.state.air_store.count() if app.state.air_store else 0,
         "fires": await app.state.fire_store.count() if app.state.fire_store else 0,
         "ferries": await app.state.ferry_store.count() if app.state.ferry_store else 0,
+        "hazards": await app.state.hazard_store.count() if app.state.hazard_store else 0,
         "buses": await app.state.bus_store.count() if app.state.bus_store else 0,
         "trains": await app.state.train_store.count() if app.state.train_store else 0,
         "tube": await app.state.tube_store.count() if app.state.tube_store else 0,
@@ -830,6 +841,8 @@ async def feature_flags():
     flags["fire"] = bool(app.state.settings.enable_fire and app.state.settings.firms_map_key)
     # Ferry service-status layer (CalMac + NorthLink) — keyless.
     flags["ferry"] = bool(app.state.settings.enable_ferry)
+    # Hazards layer (SEPA floods + Met Office warnings + BGS quakes).
+    flags["hazard"] = bool(app.state.settings.enable_hazards)
     # London buses available when the BODS feed is enabled + keyed server-side.
     flags["bus"] = bool(app.state.settings.enable_bus and app.state.settings.bods_api_key)
     # London traffic cameras available when the TfL feed is enabled server-side.
@@ -932,6 +945,19 @@ async def aircraft_detail(hex: str):
         "info": info,
         "route": route,
     }
+
+
+@app.get("/api/hazards")
+async def list_hazards():
+    """Environmental hazards in force — flood warnings (with polygons),
+    severe-weather warnings, recent quakes. Empty is the happy state."""
+    store = app.state.hazard_store
+    if store is None:
+        raise HTTPException(404, "hazards feed disabled")
+    hazards = await store.snapshot()
+    rank = {"serious": 0, "moderate": 1, "minor": 2}
+    hazards.sort(key=lambda h: (rank.get(h.severity, 3), -h.ts))
+    return {"hazards": [h.model_dump() for h in hazards]}
 
 
 @app.get("/api/ferries")

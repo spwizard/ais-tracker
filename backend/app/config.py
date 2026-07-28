@@ -61,6 +61,9 @@ class Settings(BaseSettings):
     # --- Ferries (CalMac GraphQL + NorthLink notices — keyless) -------------
     enable_ferry: bool = Field(default=True, alias="ENABLE_FERRY")
 
+    # --- Hazards (SEPA floods + Met Office warnings + BGS quakes) -----------
+    enable_hazards: bool = Field(default=True, alias="ENABLE_HAZARDS")
+
     # --- Wildfires (NASA FIRMS — free map key, near-real-time) --------------
     enable_fire: bool = Field(default=True, alias="ENABLE_FIRE")
     firms_url: str = Field(

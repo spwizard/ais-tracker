@@ -294,6 +294,24 @@ export interface Aircraft {
   ts: number; // last update, epoch seconds
 }
 
+/** An environmental hazard in force — flood warning (with polygon), severe-
+ *  weather warning, or recent earthquake. Empty is the happy state. */
+export interface Hazard {
+  id: string;
+  kind: "flood" | "weather" | "quake";
+  severity: "minor" | "moderate" | "serious";
+  title: string;
+  detail: string | null;
+  region: string | null;
+  lat: number;
+  lon: number;
+  geometry: GeoJSON.Geometry | null;
+  url: string | null;
+  magnitude: number | null;
+  ts: number;
+  updated: number;
+}
+
 export interface FerryPort {
   name: string;
   lat: number;
