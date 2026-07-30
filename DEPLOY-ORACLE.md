@@ -175,7 +175,14 @@ sudo tee /etc/caddy/Caddyfile >/dev/null <<'EOF'
 # Canonical site — auto-HTTPS.
 arguseyes.xyz {
     encode zstd gzip
-    reverse_proxy 127.0.0.1:8000
+    # route{} preserves order: the SPA shell must revalidate every load
+    # (heuristic caching once served stale deploys for hours), while the
+    # hash-named build assets are immutable.
+    route {
+        header Cache-Control "no-cache"
+        header /assets/* Cache-Control "public, max-age=31536000, immutable"
+        reverse_proxy 127.0.0.1:8000
+    }
 }
 
 # www → apex.
