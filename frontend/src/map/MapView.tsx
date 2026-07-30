@@ -815,6 +815,8 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
                   ? buildFerryTooltip(object as FerryRoute)
                 : object && (object as FireComplex).kind === "industrial"
                   ? buildIndustrialTooltip(object as FireComplex)
+                : object && (object as FireComplex).kind === "wildfire"
+                  ? buildFireComplexTooltip(object as FireComplex)
                 : object && (object as FireDetection).frp !== undefined
                   ? buildFireTooltip(object as FireDetection)
                 : object && (object as Alert).category
@@ -1101,6 +1103,22 @@ function buildFerryTooltip(r: FerryRoute) {
           ${escapeHtml(r.name)}
         </div>
         <div style="opacity:.75;font-size:11px">${escapeHtml(r.operator)} · ${label} · tap for detail</div>
+      </div>`,
+    style: tooltipStyle(),
+  };
+}
+
+function buildFireComplexTooltip(c: FireComplex) {
+  const name = c.place ?? `${c.lat.toFixed(2)}, ${c.lon.toFixed(2)}`;
+  const mw = c.total_frp >= 1000 ? `${(c.total_frp / 1000).toFixed(1)}k` : `${Math.round(c.total_frp)}`;
+  return {
+    html: `
+      <div style="font-family:Inter,system-ui,sans-serif;min-width:150px;max-width:230px">
+        <div style="display:flex;align-items:center;gap:6px;font-weight:600;margin-bottom:2px">
+          <span style="width:10px;height:10px;border-radius:9999px;background:#f97316"></span>
+          ${escapeHtml(name)} · ${mw} MW
+        </div>
+        <div style="opacity:.75;font-size:11px">Wildfire · ${escapeHtml(c.status)} · tap for detail</div>
       </div>`,
     style: tooltipStyle(),
   };

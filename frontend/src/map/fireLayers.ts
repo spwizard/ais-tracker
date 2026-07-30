@@ -65,11 +65,13 @@ let _derived: {
   visible: FireDetection[];
   big: FireDetection[];
   industrial: FireComplex[];
+  wildfires: FireComplex[];
 } | null = null;
 
 function derive(fires: FireDetection[], complexes: FireComplex[]) {
   if (_derived?.fires !== fires || _derived?.complexes !== complexes) {
     const industrial = complexes.filter((c) => c.kind === "industrial");
+    const wildfires = complexes.filter((c) => c.kind !== "industrial");
     // The ember field glows only where the clustering believes a wildfire is.
     // Raw pixels the backend rejected — refinery flares, solar glint, one-off
     // field burns — and pixels of industrial complexes render no embers (the
@@ -93,6 +95,7 @@ function derive(fires: FireDetection[], complexes: FireComplex[]) {
       visible,
       big: visible.filter((f) => f.frp >= BIG_FIRE_FRP),
       industrial,
+      wildfires,
     };
   }
   return _derived;
@@ -110,7 +113,35 @@ export interface FireLayerOptions {
 export function buildFireLayers(opts: FireLayerOptions) {
   const { fires, complexes, currentTime, zoom, onClick, onSelectComplex } = opts;
   if (zoom < FIRE_MIN_ZOOM || fires.length === 0) return [];
-  const { visible, big, industrial } = derive(fires, complexes);
+  const { visible, big, industrial, wildfires } = derive(fires, complexes);
+
+  // Invisible tap target over every wildfire complex. What the eye reads as
+  // "the fire" is the heatmap bloom — which can't be picked — and the per-pixel
+  // cores are only a few px wide, so without this a modest fire (no ≥100 MW
+  // pixel → no halo) was near-unclickable. Sized by the complex's extent with
+  // a generous floor; sits under the visible marks so it never occludes them.
+  const hitTargets = onSelectComplex
+    ? [
+        new ScatterplotLayer<FireComplex>({
+          id: "fire-hit-targets",
+          data: wildfires,
+          pickable: true,
+          getPosition: (d) => [d.lon, d.lat],
+          // Half the span as metres, clamped to a pixel range that matches the
+          // heatmap bloom the eye actually aims for (~46 px paint radius).
+          getRadius: (d) => Math.max(d.span_km, 2) * 500,
+          radiusUnits: "meters",
+          radiusMinPixels: 34,
+          radiusMaxPixels: 80,
+          filled: true,
+          // Alpha 1, not 0: deck discards fully-transparent fragments in the
+          // picking pass, so a 0-alpha target would never pick. 1/255 is
+          // imperceptible but pickable.
+          getFillColor: [0, 0, 0, 1],
+          onClick: (info) => onSelectComplex((info.object as FireComplex) ?? null),
+        }),
+      ]
+    : [];
 
   // Suspected industrial / persistent thermal sources — a calm slate marker so a
   // power station never reads as a wildfire. Sits above the ember field.
@@ -145,6 +176,7 @@ export function buildFireLayers(opts: FireLayerOptions) {
   const coreRadius = zoom < 6 ? 1.4 : zoom < 9 ? 2.2 : 3.4;
 
   return [
+    ...hitTargets,
     // 1. The bloom — where the land is burning, visible from far out.
     new HeatmapLayer<FireDetection>({
       id: "fire-heat",

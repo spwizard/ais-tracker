@@ -463,12 +463,57 @@ export default function App() {
     setOpen("wildfires", true);
     selectFire(best);
   };
-  // Tap an industrial marker → open its labelled detail directly.
+  // Tap a fire's hit-target or an industrial marker → open its detail.
   const selectComplexOnMap = (c: FireComplex | null) => {
     if (!c) return;
     setOpen("wildfires", true);
     selectFire(c);
   };
+
+  // Resolve a ?fire= deep link once the complex list arrives: exact id first,
+  // else "lat,lon" snaps to the nearest complex (durable across id churn as a
+  // growing fire's centroid — and so its hash id — drifts between rebuilds).
+  useEffect(() => {
+    const target = pendingFireRef.current;
+    if (!target || fireComplexes.length === 0) return;
+    pendingFireRef.current = null;
+    let hit = fireComplexes.find((c) => c.id === target) ?? null;
+    if (!hit) {
+      const m = target.match(/^(-?[\d.]+),(-?[\d.]+)$/);
+      if (m) {
+        const lat = parseFloat(m[1]);
+        const lon = parseFloat(m[2]);
+        let bestD = 0.5 * 0.5; // within ~50 km, else the link is stale
+        for (const c of fireComplexes) {
+          const dd = (c.lat - lat) ** 2 + (c.lon - lon) ** 2;
+          if (dd < bestD) {
+            bestD = dd;
+            hit = c;
+          }
+        }
+      }
+    }
+    if (hit) {
+      setOpen("wildfires", true);
+      selectFire(hit);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fireComplexes]);
+
+  // Reflect the selected fire back into the URL as ?fire=lat,lon — so the
+  // address bar is always a shareable link to what you're looking at.
+  useEffect(() => {
+    if (!urlApplied.current) return;
+    const sel =
+      showFire && selectedFireId
+        ? fireComplexes.find((c) => c.id === selectedFireId) ?? null
+        : null;
+    const p = new URLSearchParams(window.location.search);
+    if (sel) p.set("fire", `${sel.lat.toFixed(3)},${sel.lon.toFixed(3)}`);
+    else if (!pendingFireRef.current) p.delete("fire");
+    const qs = p.toString();
+    window.history.replaceState(null, "", qs ? `${window.location.pathname}?${qs}` : window.location.pathname);
+  }, [selectedFireId, showFire, fireComplexes]);
 
   const selectedFerry = useMemo(
     () => ferryRoutes.find((r) => r.id === selectedFerryId) ?? null,
@@ -519,20 +564,29 @@ export default function App() {
     cameras: [showCameras, setShowCameras],
   };
   const urlApplied = useRef(false);
+  // A ?fire= target (complex id or "lat,lon") parsed from the arrival URL,
+  // resolved once the complex list loads (it arrives async).
+  const pendingFireRef = useRef<string | null>(null);
   // On load: apply the ?layers= set exactly (listed on, everything else off),
-  // and honour a ?region= jump (shareable links like ?region=scotland).
+  // honour a ?region= jump, and stash a ?fire= deep-link target.
   useEffect(() => {
     const params = new URLSearchParams(INITIAL_SEARCH);
+    const fireTarget = params.get("fire");
+    if (fireTarget) pendingFireRef.current = fireTarget;
     const raw = params.get("layers");
     if (raw !== null) {
       const want = new Set(raw.split(",").map((s) => s.trim()).filter(Boolean));
       if (want.has("fire")) {
         focusFireView(false); // quiet others, fire on
-        setTimeout(() => mapRef.current?.flyTo({ longitude: -1.5, latitude: 41.5, zoom: 5.3 }), 800);
+        // The fire deep link supplies its own destination — skip Iberia.
+        if (!fireTarget)
+          setTimeout(() => mapRef.current?.flyTo({ longitude: -1.5, latitude: 41.5, zoom: 5.3 }), 800);
       } else {
         for (const [key, [, set]] of Object.entries(LAYER_STATE)) set(want.has(key));
         if (want.has("incidents")) setOpen("incidents", true);
       }
+    } else if (fireTarget) {
+      focusFireView(false); // a fire link implies the fire view
     }
     const region = REGION_VIEWS[params.get("region") ?? ""];
     // A region jump wins over the fire view's default framing.
