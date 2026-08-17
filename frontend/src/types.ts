@@ -572,16 +572,22 @@ export interface CameraAnalysis {
   summary: string;
 }
 
-/** A London traffic camera (TfL JamCam) — the "land" domain. */
+/** A traffic camera — the "land" domain. TfL JamCams (London) or Traffic
+ *  Scotland LEV stills (trunk roads); `provider` drives credit + media shape. */
+export type CameraProvider = "tfl" | "scot";
+
 export interface Camera {
   id: string;
   name: string | null;
   lat: number;
   lon: number;
   view: string | null; // direction the camera faces, e.g. "West"
-  image: string; // JPEG snapshot (refreshed every few minutes)
-  video: string | null; // 5-second looped MP4
+  image: string; // JPEG snapshot (public URL, or a path on our API)
+  video: string | null; // 5-second looped MP4 (TfL only)
   available: boolean;
+  provider: CameraProvider;
+  attribution: { name: string; url: string }; // operator credit (licence term)
+  updated?: number | null; // epoch s the still was captured/fetched (Scotland)
 }
 
 /** WebSocket frames from the backend broadcaster. */

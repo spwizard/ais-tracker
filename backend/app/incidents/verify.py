@@ -67,8 +67,13 @@ class IncidentVerifier:
                 inc.verified_at = now  # no camera to see it — don't retry hard
                 await store.upsert(inc)
                 continue
+            image = self._cameras.image(cam)
+            if image is None:
+                inc.verified_at = now
+                await store.upsert(inc)
+                continue
             try:
-                v = await self._analyst.verify(cam["image"], f"{inc.title}. {inc.detail or ''}")
+                v = await self._analyst.verify(image, f"{inc.title}. {inc.detail or ''}")
             except Exception:  # noqa: BLE001
                 inc.verified_at = now
                 await store.upsert(inc)

@@ -153,6 +153,11 @@ class Settings(BaseSettings):
         default="https://api.tfl.gov.uk/Place/Type/JamCam", alias="TFL_JAMCAM_URL"
     )
     tfl_app_key: str = Field(default="", alias="TFL_APP_KEY")  # optional, raises limits
+    # Traffic Scotland LEV cameras — FTP access granted on application (private
+    # credentials, never exposed to clients). Idles cleanly when unset.
+    scot_lev_host: str = Field(default="ftp.traffic-scotland.co.uk", alias="SCOT_LEV_HOST")
+    scot_lev_user: str = Field(default="", alias="SCOT_LEV_USER")
+    scot_lev_password: str = Field(default="", alias="SCOT_LEV_PASSWORD")
     # Claude-vision model for the "analyze scene" camera feature (fast + cheap;
     # it's a simple structured count/congestion read on a tiny still).
     camera_vision_model: str = Field(

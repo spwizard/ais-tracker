@@ -86,12 +86,19 @@ class CameraAnalyst:
     async def close(self) -> None:
         await self._http.aclose()
 
-    async def analyze(self, image_url: str) -> CameraAnalysis:
-        client = self._ensure_client()  # raises VisionUnavailable if no key
-        img = await self._http.get(image_url)
+    async def _load(self, image: str | bytes) -> tuple[str, str]:
+        """(media_type, base64) for a snapshot given as a URL or raw bytes —
+        providers we proxy (Traffic Scotland) hand us the frame directly."""
+        if isinstance(image, bytes):
+            return "image/jpeg", base64.standard_b64encode(image).decode()
+        img = await self._http.get(image)
         img.raise_for_status()
         media_type = img.headers.get("content-type", "image/jpeg").split(";")[0]
-        b64 = base64.standard_b64encode(img.content).decode()
+        return media_type, base64.standard_b64encode(img.content).decode()
+
+    async def analyze(self, image: str | bytes) -> CameraAnalysis:
+        client = self._ensure_client()  # raises VisionUnavailable if no key
+        media_type, b64 = await self._load(image)
 
         resp = await client.with_options(timeout=30).messages.parse(
             model=self._model,
@@ -120,13 +127,10 @@ class CameraAnalyst:
             raise VisionUnavailable("model returned no analysis")
         return out
 
-    async def verify(self, image_url: str, incident_desc: str) -> IncidentVerdict:
+    async def verify(self, image: str | bytes, incident_desc: str) -> IncidentVerdict:
         """Look through a camera and judge whether it supports a reported incident."""
         client = self._ensure_client()
-        img = await self._http.get(image_url)
-        img.raise_for_status()
-        media_type = img.headers.get("content-type", "image/jpeg").split(";")[0]
-        b64 = base64.standard_b64encode(img.content).decode()
+        media_type, b64 = await self._load(image)
         resp = await client.with_options(timeout=30).messages.parse(
             model=self._model,
             max_tokens=200,

@@ -382,7 +382,7 @@ export function LayerControls({
                 <Row
                   icon={Cctv}
                   label="Traffic cameras"
-                  hint="Live TfL junction cameras — zoom into London, then click one."
+                  hint="Live TfL junction cameras + Traffic Scotland trunk-road cameras — zoom in, then click one."
                   checked={showCameras}
                   onChange={onToggleCameras}
                 />

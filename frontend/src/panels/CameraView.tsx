@@ -15,6 +15,7 @@ import { Hint } from "@/components/ui/tooltip";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { FloatingPanel, type PanelChrome } from "@/components/FloatingPanel";
 import { useCameraAnalysis } from "@/hooks/useCameraAnalysis";
+import { CameraCreditRow, CameraFreshness, CameraWatermark } from "./CameraCredit";
 import { cn } from "@/lib/utils";
 import type { Camera, CameraAnalysis } from "@/types";
 
@@ -43,7 +44,7 @@ interface CameraViewProps {
   onAddToWall: () => void;
 }
 
-const REFRESH_MS = 90_000; // TfL refreshes snapshots/clips every few minutes
+const REFRESH_MS = 90_000; // TfL refreshes clips every few minutes; Scotland stills every 5–10 (ETag → 304)
 
 export function CameraView({
   chrome,
@@ -148,6 +149,8 @@ export function CameraView({
               {camera.lat.toFixed(4)}, {camera.lon.toFixed(4)}
             </span>
           </div>
+
+          <CameraCreditRow camera={camera} />
 
           {/* AI scene analysis (aggregate + anonymous — no plate/individual ID) */}
           {camera.available && (
@@ -345,18 +348,8 @@ function CameraMedia({
         />
       )}
 
-      {camera.available && (
-        <div className="pointer-events-none absolute left-2 top-2 flex items-center gap-1.5 rounded-full bg-black/55 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white backdrop-blur-sm">
-          <span className="relative flex h-1.5 w-1.5">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
-            <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-red-500" />
-          </span>
-          Live
-        </div>
-      )}
-      <div className="pointer-events-none absolute bottom-1 right-2 text-[9px] text-white/70 [text-shadow:0_1px_2px_rgba(0,0,0,0.8)]">
-        TfL Open Data
-      </div>
+      {camera.available && <CameraFreshness camera={camera} />}
+      <CameraWatermark camera={camera} />
     </div>
   );
 }

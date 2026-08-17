@@ -3,6 +3,7 @@ import { X } from "lucide-react";
 import { compassLabel } from "@/lib/compass";
 import { cn } from "@/lib/utils";
 import type { Camera } from "@/types";
+import { CameraFreshness, CameraWatermark } from "./CameraCredit";
 
 const STAGGER_MS = 150; // offset each tile's first load so decoders don't spike
 const LIVE_REFRESH_MS = 150_000; // periodically re-pull the clip for freshness
@@ -36,9 +37,12 @@ export function CameraTile({
   const wrapRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [stillKey, setStillKey] = useState(0);
+  // Clip playback only for feeds that have one (TfL); Scotland is stills-only
+  // whatever the wall mode, refreshed on the still cadence.
+  const clip = mode === "live" && !!camera.video;
 
   useEffect(() => {
-    if (mode !== "live" || !camera.available || !camera.video) return;
+    if (!clip || !camera.available || !camera.video) return;
     const v = videoRef.current;
     const wrap = wrapRef.current;
     if (!v || !wrap) return;
@@ -73,17 +77,17 @@ export function CameraTile({
     // `index` is only for stagger timing (captured on mount) — it must NOT be a
     // dependency, or reordering the wall (e.g. bus-follow) reloads the video.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, camera.id, camera.video, camera.available]);
+  }, [clip, camera.id, camera.video, camera.available]);
 
   useEffect(() => {
-    if (mode !== "stills") return;
+    if (clip) return;
     const id = setInterval(
       () => setStillKey((k) => k + 1),
       STILL_REFRESH_MS + index * 1500,
     );
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode]);
+  }, [clip]);
 
   return (
     <div
@@ -97,7 +101,7 @@ export function CameraTile({
         <div className="grid h-full place-items-center text-[10px] text-muted-foreground">
           Offline
         </div>
-      ) : mode === "live" ? (
+      ) : clip ? (
         <video
           ref={videoRef}
           poster={camera.image}
@@ -126,15 +130,10 @@ export function CameraTile({
         )}
       </div>
 
-      {camera.available && mode === "live" && (
-        <div className="pointer-events-none absolute left-1.5 top-1.5 flex items-center gap-1 rounded-full bg-black/55 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-white backdrop-blur-sm">
-          <span className="relative flex h-1 w-1">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
-            <span className="relative inline-flex h-1 w-1 rounded-full bg-red-500" />
-          </span>
-          Live
-        </div>
+      {camera.available && (clip || camera.provider === "scot") && (
+        <CameraFreshness camera={camera} size="sm" />
       )}
+      <CameraWatermark camera={camera} className="bottom-5" />
 
       {isNext && (
         <div className="pointer-events-none absolute left-1/2 top-1.5 -translate-x-1/2 animate-pulse rounded-full bg-cyan-400 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-black shadow">

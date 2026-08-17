@@ -137,21 +137,23 @@ TOOLS: list[dict] = [
     },
 ]
 
-# Land-domain eyes — only offered when the TfL camera feed is enabled.
+# Land-domain eyes — only offered when the camera feed is enabled.
 CAMERA_TOOLS: list[dict] = [
     {
         "name": "find_cameras",
         "description": (
-            "Search London's ~880 live TfL traffic cameras (the app's land-domain "
-            "eyes). Filter by a road/place name substring and/or sort by distance "
-            "to a lat/lon. Returns camera ids, names, positions and view direction."
+            "Search the live traffic cameras (the app's land-domain eyes): ~880 "
+            "TfL JamCams across London plus ~500 Traffic Scotland trunk-road "
+            "cameras (M8, M74, M90, A9, A90, Forth bridges…). Filter by a road/place "
+            "name substring and/or sort by distance to a lat/lon. Returns camera "
+            "ids, names, positions, view direction and operator."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "Road or place substring, e.g. 'A40', 'Earls Court', 'Tower Bridge'",
+                    "description": "Road or place substring, e.g. 'A40', 'Earls Court', 'M8 J8', 'Drumochter'",
                 },
                 "lat": {"type": "number", "description": "With lon: sort nearest-first to this point"},
                 "lon": {"type": "number"},
@@ -248,10 +250,10 @@ Destination" using their first calling-point time. Times are UK local. After
 rail answers, call show_on_map with the service's lat/lon to point the map at
 it when the user asks about a specific train or area.
 
-EYES ON LAND — when camera tools are available you can literally look at London \
-road traffic: find_cameras locates TfL junction cameras, view_camera runs vision \
-on one's live snapshot. Use them for questions about London roads, congestion or \
-conditions at a place. When several found cameras cover the asked location, view \
+EYES ON LAND — when camera tools are available you can literally look at road \
+traffic in London (TfL) and on Scotland's trunk roads (Traffic Scotland): \
+find_cameras locates cameras, view_camera runs vision on one's live snapshot. Use \
+them for questions about roads, congestion, weather or conditions at a place. When several found cameras cover the asked location, view \
 EACH relevant one (up to 3) before answering — one viewpoint misses what another \
 shows, and the user is shown every frame you analyze as evidence. The feed is a \
 low-resolution snapshot refreshed every few minutes: report reads as indicative \
@@ -496,7 +498,10 @@ class AnalystService:
         return {
             "total_matching": len(out),
             "cameras": [
-                {"id": c["id"], "name": c["name"], "lat": c["lat"], "lon": c["lon"], "view": c["view"]}
+                {
+                    "id": c["id"], "name": c["name"], "lat": c["lat"], "lon": c["lon"],
+                    "view": c["view"], "operator": (c.get("attribution") or {}).get("name"),
+                }
                 for c in out[:limit]
             ],
         }

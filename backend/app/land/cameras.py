@@ -1,4 +1,11 @@
-"""London traffic cameras (the "land" domain) via TfL's JamCams open-data feed.
+"""Traffic cameras (the "land" domain): TfL JamCams + Traffic Scotland LEV.
+
+``CameraCatalog`` is the one list the API, search, analyst tools and incident
+verifier read — TfL cameras fetched from the open feed here, plus whatever
+regional providers are plugged in (currently ``ScotCameraCatalog``, fed by its
+FTP source). Every row carries ``provider`` + ``attribution`` so the frontend
+credits the right operator, and ``image`` is either a public URL (TfL) or a
+path on our own API (providers whose frames we hold ourselves).
 
 TfL exposes ~880 CCTV cameras at junctions/tunnels/bridges as geolocated
 "Place" objects, each carrying a JPEG snapshot (refreshed every few minutes) and
@@ -15,10 +22,13 @@ import time
 
 import httpx
 
+from .scot_cameras import ScotCameraCatalog
+
 log = logging.getLogger("land.cameras")
 
 _UA = "ais-tracker/1.0 (+https://github.com/spwizard/ais-tracker)"
 _TTL = 3600.0  # camera catalogue changes rarely; refresh hourly
+_TFL_ATTRIBUTION = {"name": "TfL Open Data", "url": "https://tfl.gov.uk/info-for/open-data-users/"}
 
 
 def _parse_camera(place: dict) -> dict | None:
@@ -37,13 +47,23 @@ def _parse_camera(place: dict) -> dict | None:
         "image": image,
         "video": props.get("videoUrl"),
         "available": str(props.get("available")).lower() == "true",
+        "provider": "tfl",
+        "attribution": _TFL_ATTRIBUTION,
     }
 
 
 class CameraCatalog:
-    def __init__(self, url: str, app_key: str = "") -> None:
+    def __init__(
+        self,
+        url: str,
+        app_key: str = "",
+        scot: ScotCameraCatalog | None = None,
+        tfl: bool = True,
+    ) -> None:
         self._url = url
         self._key = app_key
+        self._tfl = tfl
+        self._scot = scot
         self._client = httpx.AsyncClient(
             timeout=httpx.Timeout(15.0), headers={"User-Agent": _UA}
         )
@@ -55,6 +75,31 @@ class CameraCatalog:
         await self._client.aclose()
 
     async def list(self) -> list[dict]:
+        """All cameras across providers. TfL failures don't hide the others."""
+        cams: list[dict] = []
+        if self._tfl:
+            try:
+                cams.extend(await self._list_tfl())
+            except httpx.HTTPError as exc:
+                if self._scot is None or not len(self._scot):
+                    raise
+                log.warning("TfL cameras fetch failed (serving other providers): %s", exc)
+        if self._scot is not None:
+            cams.extend(self._scot.list())
+        return cams
+
+    async def find(self, cam_id: str) -> dict | None:
+        return next((c for c in await self.list() if c["id"] == cam_id), None)
+
+    def image(self, cam: dict) -> str | bytes | None:
+        """What vision should look at: a fetchable URL, or the raw frame bytes
+        for providers whose images live in this process. None if no frame."""
+        if cam.get("provider") == "scot" and self._scot is not None:
+            sc = self._scot.get(cam["id"])
+            return sc.frame if sc is not None else None
+        return cam.get("image")
+
+    async def _list_tfl(self) -> list[dict]:
         if self._cache is not None and self._expiry > time.time():
             return self._cache
         async with self._lock:

@@ -1,14 +1,14 @@
 /**
- * London traffic-camera markers (TfL JamCams) — the "land" layer. Fixed points,
- * so no dead-reckoning; only shown once zoomed into London (below that they're a
- * meaningless cluster over the whole map). Available cameras glow amber; the
- * selected one brightens and grows.
+ * Traffic-camera markers (TfL JamCams + Traffic Scotland LEV) — the "land"
+ * layer. Fixed points, so no dead-reckoning; only shown once zoomed in (below
+ * that they're a meaningless cluster over London and the Scottish trunk roads).
+ * Available cameras glow amber; the selected one brightens and grows.
  */
 import { IconLayer } from "@deck.gl/layers";
 import type { Camera } from "@/types";
 import { getCameraIconAtlas, CAMERA_ICON_MAPPING } from "./cameraIcons";
 
-// Below this zoom the ~880 London cameras are just a blob — hide them.
+// Below this zoom the ~1,400 cameras are just a blob — hide them.
 export const CAMERA_MIN_ZOOM = 9;
 
 export interface CameraLayerOptions {

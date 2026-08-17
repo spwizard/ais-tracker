@@ -20,6 +20,7 @@ import contextlib
 import logging
 import os
 import time
+from email.utils import formatdate
 from contextlib import asynccontextmanager
 
 import anthropic
@@ -52,6 +53,7 @@ from .weather_point import WindyPoint
 from .ship_types import SHIP_TYPE_GROUPS
 from .air.enrich import AircraftEnricher
 from .land.cameras import CameraCatalog
+from .land.scot_cameras import ScotCameraCatalog
 from .land.tube import TubeNetwork
 from .land.vision import CameraAnalyst, VisionUnavailable
 from .sources import AdsbLolSource, BodsSource, create_sources
@@ -59,6 +61,7 @@ from .sources.darwin import DarwinSource
 from .sources.rail_sim import SimRailSource
 from .sources.tube import TubeSource
 from .sources.scot_road import ScotRoadSource
+from .sources.scot_cameras import ScotCameraSource
 from .sources.tfl_road import TflRoadSource
 from .incidents.news import NewsSource
 from .incidents.social import SocialSource
@@ -323,9 +326,16 @@ async def lifespan(app: FastAPI):
     app.state.incident_verifier = None  # set after camera analyst/catalog exist
     # Aircraft enrichment (registration / operator / route / photo) via adsbdb.
     app.state.air_enricher = AircraftEnricher() if settings.enable_air else None
-    # Land domain: London traffic cameras (TfL JamCams), lazily fetched + cached.
+    # Land domain: traffic cameras — TfL JamCams (lazily fetched + cached) plus
+    # Traffic Scotland LEV frames (held in-process, filled by an FTP source).
+    scot_cameras = (
+        ScotCameraCatalog()
+        if settings.enable_cameras and settings.scot_lev_user and settings.scot_lev_password
+        else None
+    )
+    app.state.scot_cameras = scot_cameras
     app.state.cameras = (
-        CameraCatalog(settings.tfl_jamcam_url, settings.tfl_app_key)
+        CameraCatalog(settings.tfl_jamcam_url, settings.tfl_app_key, scot=scot_cameras)
         if settings.enable_cameras
         else None
     )
@@ -391,6 +401,9 @@ async def lifespan(app: FastAPI):
             sources.append(SimRailSource(train_store, settings))
     if tube_store is not None:
         sources.append(TubeSource(tube_store, app.state.tube_network, settings))
+    if scot_cameras is not None:
+        # Traffic Scotland cameras — one FTP sweep per 10 min into the catalogue.
+        sources.append(ScotCameraSource(scot_cameras, settings))
     if incident_store is not None:
         app.state.tfl_road = TflRoadSource(incident_store, settings)
         sources.append(app.state.tfl_road)
@@ -464,16 +477,16 @@ async def lifespan(app: FastAPI):
         gemini_search_model=settings.gemini_search_model,
     )
 
-    # Analyst eyes: look through a TfL camera — vision analysis of its snapshot.
+    # Analyst eyes: look through a traffic camera — vision analysis of its snapshot.
     async def _analyst_camera_view(cam_id: str) -> dict:
-        cams = await app.state.cameras.list()
-        cam = next((c for c in cams if c["id"] == cam_id), None)
+        cam = await app.state.cameras.find(cam_id)
         if cam is None:
             return {"error": "unknown camera id — use find_cameras first"}
-        if not cam.get("available"):
+        image = app.state.cameras.image(cam) if cam.get("available") else None
+        if image is None:
             return {"error": "camera offline"}
         try:
-            analysis = await app.state.camera_analyst.analyze(cam["image"])
+            analysis = await app.state.camera_analyst.analyze(image)
         except Exception as exc:  # noqa: BLE001 — surface as a tool error, not a 500
             return {"error": f"vision analysis failed: {exc}"}
         return {
@@ -1003,8 +1016,9 @@ async def list_fire_complexes():
 
 @app.get("/api/cameras")
 async def list_cameras():
-    """London traffic cameras (TfL JamCams) — the 'land' surveillance layer.
-    Each has a live-ish snapshot + a 5s clip the browser loads directly."""
+    """Traffic cameras (TfL JamCams + Traffic Scotland LEV) — the 'land' layer.
+    Each has a live-ish snapshot (TfL also a 5s clip); `image` is either a public
+    URL or a path on this API for frames we hold ourselves."""
     catalog = app.state.cameras
     if catalog is None:
         raise HTTPException(404, "cameras disabled")
@@ -1016,6 +1030,33 @@ async def list_cameras():
     return {"cameras": cams}
 
 
+@app.get("/api/cameras/scot/{file}")
+async def scot_camera_frame(file: str, request: Request):
+    """Latest Traffic Scotland frame for one camera, served from our sweep cache
+    (their FTP is private to the backend). ETag = frame hash so the browser's
+    periodic refresh is a cheap 304 until the 10-min sweep brings a new image."""
+    scot = app.state.scot_cameras
+    if scot is None:
+        raise HTTPException(404, "scottish cameras disabled")
+    cam = scot.by_file(file)
+    if cam is None:
+        raise HTTPException(404, "unknown camera")
+    if cam.frame is None:
+        raise HTTPException(503, "no frame yet")
+    etag = f'"{cam.etag}"'
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers={"ETag": etag})
+    return Response(
+        cam.frame,
+        media_type="image/jpeg",
+        headers={
+            "ETag": etag,
+            "Cache-Control": "no-cache",
+            "Last-Modified": formatdate(cam.frame_ts, usegmt=True),
+        },
+    )
+
+
 @app.post("/api/cameras/{cam_id:path}/analyze")
 async def analyze_camera(cam_id: str):
     """Claude-vision scene analysis of a camera's current snapshot — aggregate,
@@ -1024,14 +1065,14 @@ async def analyze_camera(cam_id: str):
     analyst = app.state.camera_analyst
     if catalog is None or analyst is None:
         raise HTTPException(404, "cameras disabled")
-    cams = await catalog.list()
-    cam = next((c for c in cams if c["id"] == cam_id), None)
+    cam = await catalog.find(cam_id)
     if cam is None:
         raise HTTPException(404, "unknown camera")
-    if not cam.get("available"):
+    image = catalog.image(cam) if cam.get("available") else None
+    if image is None:
         raise HTTPException(409, "camera offline")
     try:
-        analysis = await analyst.analyze(cam["image"])
+        analysis = await analyst.analyze(image)
     except VisionUnavailable as exc:
         raise HTTPException(503, str(exc))
     except anthropic.APIError as exc:
