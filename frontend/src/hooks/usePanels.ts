@@ -43,7 +43,7 @@ export const PANEL_IDS: PanelId[] = [
 export const PANEL_W: Record<PanelId, number> = {
   filters: 288,
   stats: 256,
-  layers: 240,
+  layers: 280,
   detail: 320,
   aircraft: 380,
   camera: 360,
@@ -64,7 +64,7 @@ export const PANEL_W: Record<PanelId, number> = {
 export const PANEL_EST_H: Record<PanelId, number> = {
   filters: 430,
   stats: 340,
-  layers: 175,
+  layers: 420,
   detail: 380,
   aircraft: 440,
   camera: 330,
@@ -82,7 +82,6 @@ export const PANEL_EST_H: Record<PanelId, number> = {
 };
 
 const MARGIN = 16;
-const GAP = 16;
 
 export interface PanelState {
   open: boolean;
@@ -99,7 +98,7 @@ interface Rect {
   h: number;
 }
 
-const STORAGE_KEY = "ais.panels.v2";
+const STORAGE_KEY = "ais.panels.v3";
 
 function viewport() {
   return {
@@ -119,82 +118,79 @@ function isSheet(): boolean {
   return typeof window !== "undefined" && window.innerWidth <= 1024;
 }
 
+// The centred top bar is ~1000px wide on desktop, so on anything narrower than
+// a big monitor it would run into panels pinned to the top corners. Dock the
+// first row of panels below the bar's band instead.
+const TOP = MARGIN + 56;
+
 function defaults(): PanelMap {
-  const { vw, vh } = viewport();
+  const { vw } = viewport();
   const wide = !isSheet(); // start map-first on small screens (no auto-open panels)
   return {
-    filters: { open: true, x: MARGIN, y: MARGIN },
-    stats: { open: wide, x: vw - MARGIN - PANEL_W.stats, y: MARGIN },
-    layers: { open: wide, x: MARGIN, y: vh - MARGIN - PANEL_EST_H.layers },
+    // Controls left, content right: the Eyes rail owns the top-left; the
+    // region rail (incidents/wildfires/ferries) and detail panels dock in the
+    // right column. Stats is a click away in the toolbar rather than open by
+    // default — the map should be the first thing you see.
+    filters: { open: true, x: MARGIN, y: TOP },
+    stats: { open: false, x: vw - MARGIN - PANEL_W.stats, y: TOP },
+    layers: { open: wide, x: MARGIN, y: TOP },
     detail: {
       open: false,
       x: vw - MARGIN - PANEL_W.detail,
-      y: MARGIN + PANEL_EST_H.stats + GAP,
+      y: TOP,
     },
     aircraft: {
       open: false,
       x: vw - MARGIN - PANEL_W.aircraft,
-      y: MARGIN + PANEL_EST_H.stats + GAP,
+      y: TOP,
     },
     camera: {
       open: false,
       x: vw - MARGIN - PANEL_W.camera,
-      y: MARGIN + PANEL_EST_H.stats + GAP,
+      y: TOP,
     },
     bus: {
       open: false,
       x: vw - MARGIN - PANEL_W.bus,
-      y: MARGIN + PANEL_EST_H.stats + GAP,
+      y: TOP,
     },
     train: {
       open: false,
       x: vw - MARGIN - PANEL_W.train,
-      y: MARGIN + PANEL_EST_H.stats + GAP,
+      y: TOP,
     },
     station: {
       open: false,
       x: vw - MARGIN - PANEL_W.station,
-      y: MARGIN + PANEL_EST_H.stats + GAP,
+      y: TOP,
     },
     tubeboard: {
       open: false,
       x: vw - MARGIN - PANEL_W.tubeboard,
-      y: MARGIN + PANEL_EST_H.stats + GAP,
+      y: TOP,
     },
     railpulse: {
       open: false,
       x: vw - MARGIN - PANEL_W.railpulse,
-      y: MARGIN + PANEL_EST_H.stats + GAP,
+      y: TOP,
     },
     londonpulse: {
       open: false,
       x: vw - MARGIN - PANEL_W.londonpulse,
-      y: MARGIN + PANEL_EST_H.stats + GAP,
+      y: TOP,
     },
-    incidents: {
-      open: false,
-      x: MARGIN,
-      y: MARGIN + PANEL_EST_H.stats + GAP,
-    },
-    wildfires: {
-      open: false,
-      x: MARGIN,
-      y: MARGIN + PANEL_EST_H.stats + GAP,
-    },
-    ferries: {
-      open: false,
-      x: MARGIN,
-      y: MARGIN + PANEL_EST_H.stats + GAP,
-    },
+    incidents: { open: false, x: vw - MARGIN - PANEL_W.incidents, y: TOP },
+    wildfires: { open: false, x: vw - MARGIN - PANEL_W.wildfires, y: TOP },
+    ferries: { open: false, x: vw - MARGIN - PANEL_W.ferries, y: TOP },
     zones: {
       open: false,
       x: vw - MARGIN - PANEL_W.zones,
-      y: MARGIN + PANEL_EST_H.stats + GAP,
+      y: TOP,
     },
     analyst: {
       open: false,
       x: vw - MARGIN - PANEL_W.analyst,
-      y: MARGIN + PANEL_EST_H.stats + GAP,
+      y: TOP,
     },
   };
 }
@@ -234,8 +230,8 @@ function fitsViewport(r: Rect, vw: number, vh: number): boolean {
 /** Zones the map owns that panels should never cover. */
 function reservedRects(vw: number, vh: number): Rect[] {
   return [
-    // Centered top toolbar
-    { x: vw / 2 - 240, y: 8, w: 480, h: 56 },
+    // Centered top toolbar (~1000px wide on desktop)
+    { x: vw / 2 - 520, y: 8, w: 1040, h: 56 },
     // Map controls cluster (bottom-right)
     { x: vw - MARGIN - 44, y: vh - MARGIN - 104, w: 44, h: 104 },
   ];
@@ -247,12 +243,12 @@ function findFreeSlot(w: number, h: number, obstacles: Rect[]): Rect {
   const step = 24;
   const columns = [vw - MARGIN - w, MARGIN, Math.round((vw - w) / 2)];
   for (const x of columns) {
-    for (let y = MARGIN; y + h <= vh - MARGIN; y += step) {
+    for (let y = TOP; y + h <= vh - MARGIN; y += step) {
       const r = { x, y, w, h };
       if (!obstacles.some((o) => overlaps(r, o))) return r;
     }
   }
-  return { x: vw - MARGIN - w, y: MARGIN, w, h };
+  return { x: vw - MARGIN - w, y: TOP, w, h };
 }
 
 // --- hook --------------------------------------------------------------------

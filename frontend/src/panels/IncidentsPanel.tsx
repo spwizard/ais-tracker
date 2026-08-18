@@ -11,6 +11,7 @@ import type { LucideIcon } from "lucide-react";
 import { FloatingPanel, type PanelChrome } from "@/components/FloatingPanel";
 import { cn } from "@/lib/utils";
 import { incidentTier, type Incident, type IncidentTier } from "@/types";
+import { inBounds, type RegionProfile } from "@/lib/regions";
 
 const TIER_META: Record<IncidentTier, { label: string; cls: string }> = {
   confirmed: { label: "confirmed", cls: "border-emerald-500/40 text-emerald-400" },
@@ -119,13 +120,19 @@ function CollapsibleGroup({
 
 export function IncidentsPanel({
   chrome,
-  incidents,
+  incidents: allIncidents,
+  region,
   onFocus,
 }: {
   chrome: PanelChrome;
   incidents: Incident[];
+  /** Scope the rail to the chosen region; null (custom view) shows everything. */
+  region: RegionProfile | null;
   onFocus: (i: Incident) => void;
 }) {
+  const incidents = region
+    ? allIncidents.filter((i) => inBounds(region.bounds, i.lon, i.lat))
+    : allIncidents;
   // Three registers: live incidents you should see now; routine roadworks
   // folded away; and camera-cleared ones sunk out of the way. Only the live
   // ones are shown by default, so a serious report never drowns under works.
@@ -141,7 +148,7 @@ export function IncidentsPanel({
       <div className="p-1.5">
         <div className="flex items-center justify-between px-2 py-1">
           <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-            Watching London
+            Watching {region?.label ?? "everywhere"}
           </span>
           <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
             <Landmark className="h-3 w-3" />

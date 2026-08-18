@@ -42,6 +42,16 @@ import { useHazards } from "@/hooks/useHazards";
 import { useTubeNetwork } from "@/hooks/useTubeNetwork";
 import { useCameraWall } from "@/hooks/useCameraWall";
 import { nearbyCameras, nextCameraAhead } from "@/lib/nearbyCameras";
+import { useViewport } from "@/hooks/useViewport";
+import {
+  DEFAULT_REGION,
+  LEGACY_REGION_VIEWS,
+  inBounds,
+  regionById,
+  viewFor,
+  type RegionId,
+} from "@/lib/regions";
+import type { LayerKey } from "@/lib/layers";
 import type { Camera, TrackedBus, TrackedTrain, TubeTrain, Incident, FireDetection, FireComplex, FerryRoute, Hazard } from "@/types";
 import { MapControls } from "@/panels/MapControls";
 import { ZonesPanel } from "@/panels/ZonesPanel";
@@ -104,13 +114,10 @@ const NO_HAZARDS: Hazard[] = [];
 // layers. Deep links must always parse this frozen copy.
 const INITIAL_SEARCH = typeof window !== "undefined" ? window.location.search : "";
 
-// Shareable ?region= jump targets (e.g. ?region=scotland, composable with
-// ?layers=). Slugs are stable API — don't rename casually.
-const REGION_VIEWS: Record<string, { longitude: number; latitude: number; zoom: number }> = {
-  scotland: { longitude: -4.3, latitude: 56.8, zoom: 6.3 },
-  london: { longitude: -0.1, latitude: 51.5, zoom: 10 },
-  channel: { longitude: -1.0, latitude: 50.2, zoom: 7.2 },
-};
+/** Bounds check shared by the in-view counters. */
+function inView(b: [number, number, number, number] | null, lon: number | null, lat: number | null): boolean {
+  return b != null && lon != null && lat != null && lon >= b[0] && lon <= b[2] && lat >= b[1] && lat <= b[3];
+}
 
 export default function App() {
   const { vesselsRef, aircraftRef, busesRef, trainsRef, tubeRef, incidentsRef, firesRef, version, fireVersion, incidentVersion, viewers, status, events, riskEvents, flagged, geofenceSync, setTrailGate } =
@@ -122,6 +129,13 @@ export default function App() {
 
   const [filters, setFilters] = useState<Filters>(defaultFilters);
   const [showVessels, setShowVessels] = useState(true); // the whole sea picture
+  // --- Place is the primary control (see lib/regions.ts) ------------------
+  // The chosen region (null = "Custom view" once you pan away from it) and the
+  // settled viewport, which drives the Eyes rail's in-view counts.
+  const [regionId, setRegionId] = useState<RegionId | null>(DEFAULT_REGION);
+  const [viewport, setViewport] = useState<{ bounds: [number, number, number, number] | null; zoom: number }>({ bounds: null, zoom: 5.5 });
+  const regionFlightUntil = useRef(0); // ignore "you left the region" while flying into it
+  const { sheetLayout } = useViewport();
   const [showTrails, setShowTrails] = useState(false); // off until the user enables it
   const [densityMode, setDensityMode] = useState(false);
   const [showWind, setShowWind] = useState(false);
@@ -534,7 +548,9 @@ export default function App() {
 
   // Fire focus: light up only wildfires and quiet every other layer, so the
   // fire picture is clean. Reused by the toggle and by a shared ?layers=fire URL.
-  const focusFireView = useCallback((fly = true) => {
+  // The wildfire *scene* — only entered via a ?layers=fire / ?fire= deep link
+  // (an explicit ask). The Wildfires switch in the rail just shows the layer.
+  const fireScene = useCallback(() => {
     setShowVessels(false);
     setShowAir(false);
     setShowBus(false);
@@ -546,7 +562,7 @@ export default function App() {
     setDensityMode(false);
     setShowFire(true);
     setOpen("wildfires", true);
-    if (fly) mapRef.current?.flyTo({ longitude: -1.5, latitude: 41.5, zoom: 5.3 });
+    setRegionId(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -563,6 +579,57 @@ export default function App() {
     train: [showTrain, setShowTrain],
     cameras: [showCameras, setShowCameras],
   };
+  /** Set the eyes exactly: listed on, everything else off — a scene. Rail
+   *  panels follow their layers so the map and the side content agree. */
+  const applyEyes = (eyes: LayerKey[]) => {
+    const want = new Set<string>(eyes);
+    for (const [key, [, set]] of Object.entries(LAYER_STATE)) set(want.has(key));
+    // One rail at a time (desktop only — nothing auto-opens on phones): the
+    // incident spine leads, then fire, then ferries. The others open from
+    // their rows in the Eyes rail.
+    const wide = !sheetLayout;
+    const lead = (["incidents", "fire", "ferry"] as const).find((k) => want.has(k));
+    setOpen("incidents", wide && lead === "incidents");
+    setOpen("wildfires", wide && lead === "fire");
+    setOpen("ferries", wide && lead === "ferry");
+    if (!want.has("fire")) setSelectedFireId(null);
+    if (!want.has("ferry")) setSelectedFerryId(null);
+  };
+  const flyToRegion = (id: RegionId) => {
+    const r = regionById(id);
+    if (!r) return;
+    regionFlightUntil.current = Date.now() + 3000;
+    mapRef.current?.flyTo(viewFor(r.view, sheetLayout));
+  };
+  /** Choosing a place is the ONE action that moves the map: fly there, and
+   *  light the eyes that make sense for it. Layer switches never travel. */
+  const enterRegion = (id: RegionId) => {
+    const r = regionById(id);
+    if (!r) return;
+    setRegionId(id);
+    applyEyes(r.eyes);
+    flyToRegion(id);
+    if (!sheetLayout && r.eyes.includes("incidents")) {
+      autoPlace("incidents");
+      focus("incidents");
+    }
+  };
+  // Viewport settles → remember it (for in-view counts) and, if the map centre
+  // has left the chosen region, the picker honestly reads "Custom view".
+  const onViewportChange = useCallback(
+    (bounds: [number, number, number, number], zoom: number) => {
+      setViewport({ bounds, zoom });
+      if (Date.now() < regionFlightUntil.current) return;
+      setRegionId((cur) => {
+        const r = regionById(cur);
+        if (!r) return cur;
+        const lon = (bounds[0] + bounds[2]) / 2;
+        const lat = (bounds[1] + bounds[3]) / 2;
+        return inBounds(r.bounds, lon, lat) ? cur : null;
+      });
+    },
+    [],
+  );
   const urlApplied = useRef(false);
   // A ?fire= target (complex id or "lat,lon") parsed from the arrival URL,
   // resolved once the complex list loads (it arrives async).
@@ -570,28 +637,50 @@ export default function App() {
   // On load: apply the ?layers= set exactly (listed on, everything else off),
   // honour a ?region= jump, and stash a ?fire= deep-link target.
   useEffect(() => {
+    // Idempotent: StrictMode runs effects twice in dev, and two overlapping
+    // flights (one restarting the other mid-transition) is exactly the kind of
+    // camera jolt the region model exists to remove.
+    if (urlApplied.current) return;
+    urlApplied.current = true;
     const params = new URLSearchParams(INITIAL_SEARCH);
     const fireTarget = params.get("fire");
     if (fireTarget) pendingFireRef.current = fireTarget;
     const raw = params.get("layers");
+    const regionParam = params.get("region");
+    const region = regionById(regionParam);
+    const legacy = regionParam ? LEGACY_REGION_VIEWS[regionParam] : undefined;
     if (raw !== null) {
       const want = new Set(raw.split(",").map((s) => s.trim()).filter(Boolean));
-      if (want.has("fire")) {
-        focusFireView(false); // quiet others, fire on
+      if (want.has("fire") && !region) {
+        fireScene(); // quiet others, fire on
         // The fire deep link supplies its own destination — skip Iberia.
         if (!fireTarget)
           setTimeout(() => mapRef.current?.flyTo({ longitude: -1.5, latitude: 41.5, zoom: 5.3 }), 800);
       } else {
         for (const [key, [, set]] of Object.entries(LAYER_STATE)) set(want.has(key));
         if (want.has("incidents")) setOpen("incidents", true);
+        if (want.has("fire")) setOpen("wildfires", true);
+        if (want.has("ferry")) setOpen("ferries", true);
       }
     } else if (fireTarget) {
-      focusFireView(false); // a fire link implies the fire view
+      fireScene(); // a fire link implies the fire view
+    } else {
+      // No explicit layers: arrive on the default region's scene.
+      applyEyes(regionById(DEFAULT_REGION)!.eyes);
     }
-    const region = REGION_VIEWS[params.get("region") ?? ""];
-    // A region jump wins over the fire view's default framing.
-    if (region) setTimeout(() => mapRef.current?.flyTo(region), 900);
-    urlApplied.current = true;
+    // ?region= — the explicit place. Its flight wins over any other framing;
+    // its default eyes only apply when the link didn't spell out ?layers=.
+    if (region) {
+      setRegionId(region.id);
+      if (raw === null) applyEyes(region.eyes);
+      // Hold the region through the initial settle + the flight, so the
+      // "you've panned away" check doesn't fire before we've even left.
+      regionFlightUntil.current = Date.now() + 3500;
+      setTimeout(() => flyToRegion(region.id), 900);
+    } else if (legacy) {
+      setRegionId(null);
+      setTimeout(() => mapRef.current?.flyTo(legacy), 900);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   // On change: reflect active layers back into the URL so the link is shareable.
@@ -601,10 +690,12 @@ export default function App() {
     const p = new URLSearchParams(window.location.search);
     if (active.length) p.set("layers", active.join(","));
     else p.delete("layers");
+    if (regionId) p.set("region", regionId);
+    else p.delete("region");
     const qs = p.toString();
     window.history.replaceState(null, "", qs ? `${window.location.pathname}?${qs}` : window.location.pathname);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showVessels, showAir, showFire, showFerry, showHazards, showIncidents, showBus, showTube, showTrain, showCameras]);
+  }, [showVessels, showAir, showFire, showFerry, showHazards, showIncidents, showBus, showTube, showTrain, showCameras, regionId]);
 
   const selectedIncident = useMemo(
     () => (selectedIncidentId ? incidentsRef.current.get(selectedIncidentId) ?? null : null),
@@ -633,6 +724,43 @@ export default function App() {
   // London traffic cameras — loaded once whenever the feature exists: the map
   // layer, the wall, bus fusion AND alert-eyes all draw on the same catalog.
   const cameras = useCameras(camerasAvailable);
+
+  // --- In-view counts for the Eyes rail --------------------------------------
+  // Recomputed when the viewport settles and on a slow tick (not per WS frame:
+  // counting ~20k entities at frame rate would be wasteful for a label).
+  const [countTick, setCountTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setCountTick((t) => t + 1), 3000);
+    return () => clearInterval(id);
+  }, []);
+  const eyeCounts = useMemo<Partial<Record<LayerKey, number>>>(() => {
+    const b = viewport.bounds;
+    if (!b) return {};
+    const count = <T,>(items: Iterable<T>, pos: (t: T) => [number | null, number | null]) => {
+      let n = 0;
+      for (const it of items) {
+        const [lon, lat] = pos(it);
+        if (inView(b, lon, lat)) n++;
+      }
+      return n;
+    };
+    const out: Partial<Record<LayerKey, number>> = {
+      vessels: count(vesselsRef.current.values(), (v) => [v.lon, v.lat]),
+      air: count(aircraftRef.current.values(), (a) => [a.lon, a.lat]),
+      bus: count(busesRef.current.values(), (x) => [x.lon, x.lat]),
+      train: count(trainsRef.current.values(), (t) => [t.lon, t.lat]),
+      tube: count(tubeRef.current.values(), (t) => [t.lon, t.lat]),
+      incidents: count(allIncidents, (i) => [i.lon, i.lat]),
+    };
+    // Layers whose data only loads while they're on: count when we have it.
+    if (cameras.length) out.cameras = count(cameras, (c) => [c.lon, c.lat]);
+    if (showFire) out.fire = count(fireComplexes, (f) => [f.lon, f.lat]);
+    if (showFerry)
+      out.ferry = ferryRoutes.filter((r) => r.ports.some((p) => inView(b, p.lon, p.lat))).length;
+    if (showHazards) out.hazards = count(hazards, (h) => [h.lon, h.lat]);
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewport, countTick, allIncidents, cameras, fireComplexes, ferryRoutes, hazards, showFire, showFerry, showHazards]);
   // Cameras nearest the selected bus, right now (recomputes as it moves).
   const busNearby = useMemo(
     () => (selectedBus ? nearbyCameras(selectedBus, cameras) : []),
@@ -998,44 +1126,9 @@ export default function App() {
 
   // The London-only layers are invisible from the Channel/Norway — enabling
   // one flies the map to London unless you're already looking at it.
-  const flyToLondonIfAway = useCallback(() => {
-    const b = mapRef.current?.getBounds();
-    const inLondon =
-      b != null &&
-      (b[0] + b[2]) / 2 > -0.65 &&
-      (b[0] + b[2]) / 2 < 0.4 &&
-      (b[1] + b[3]) / 2 > 51.2 &&
-      (b[1] + b[3]) / 2 < 51.8;
-    if (!inLondon)
-      mapRef.current?.flyTo({ longitude: -0.11, latitude: 51.5, zoom: 11 });
-  }, []);
-  const toggleLondonLayer = useCallback(
-    (set: (v: boolean) => void) => (v: boolean) => {
-      set(v);
-      if (v) flyToLondonIfAway();
-    },
-    [flyToLondonIfAway],
-  );
-
   const focusIncident = (i: Incident) => {
     setSelectedIncidentId(i.id);
     mapRef.current?.flyTo({ longitude: i.lon, latitude: i.lat, zoom: 13 });
-  };
-  // One-click Argus London focus. The incident spine is the story, so we quiet
-  // everything that would carpet the map (vessels, air, and the ~8k-strong bus
-  // fleet) and light up only the eyes that read as signal: incidents, cameras
-  // and the tube network. Buses stay a manual toggle.
-  const enterArgusLondon = () => {
-    setShowVessels(false);
-    setShowAir(false);
-    setShowBus(false);
-    setShowIncidents(true);
-    setShowCameras(true);
-    setShowTube(true);
-    mapRef.current?.flyTo({ longitude: -0.11, latitude: 51.5, zoom: 11 });
-    setOpen("incidents", true);
-    autoPlace("incidents");
-    focus("incidents");
   };
   const selectTubeStation = (st: { id: string; name: string }) => {
     setTubeStation(st);
@@ -1064,6 +1157,18 @@ export default function App() {
     if (v) selectVessel(v); // no-op panel if the vessel has gone dark since
   };
 
+  // The region rails (incidents / wildfires / ferries) share one slot: opening
+  // one closes the others, so side content never piles up in a corner.
+  const RAIL_PANELS: PanelId[] = ["incidents", "wildfires", "ferries"];
+  const openRail = (id: PanelId, open: boolean) => {
+    if (open) for (const other of RAIL_PANELS) if (other !== id) setOpen(other, false);
+    setOpen(id, open);
+    if (open && !sheetLayout) {
+      autoPlace(id);
+      focus(id);
+    }
+  };
+
   // Build the draggable-chrome props the FloatingPanel needs.
   const chromeFor = (id: PanelId): PanelChrome => ({
     position: { x: panels[id].x, y: panels[id].y },
@@ -1075,7 +1180,12 @@ export default function App() {
     onTogglePin: () => togglePin(id),
   });
 
-  const handleJump = (t: ViewTarget) => mapRef.current?.flyTo(t);
+  // "Take me where this layer has data" — an explicit ask, so it may fly.
+  const goTo = (t: ViewTarget) => {
+    regionFlightUntil.current = Date.now() + 2000;
+    setRegionId(null);
+    mapRef.current?.flyTo(viewFor(t as { longitude: number; latitude: number; zoom: number }, sheetLayout));
+  };
 
   // --- island dropdowns (search / filters / alerts) --------------------
   const [island, setIsland] = useState<IslandPanel | null>(null);
@@ -1169,6 +1279,7 @@ export default function App() {
         onReplaySelect={selectReplayVessel}
         onReplayAlertClick={onReplayAlertClick}
         onReplayViewportChange={onReplayViewportChange}
+        onViewportChange={onViewportChange}
         theme={theme}
         highlightTrack={
           searchTrack ??
@@ -1246,6 +1357,8 @@ export default function App() {
       <div className="pointer-events-none absolute inset-0">
         <TopBar
           status={status}
+          regionId={regionId}
+          onEnterRegion={enterRegion}
           total={allVessels.length}
           visible={filtered.length}
           viewers={viewers}
@@ -1333,6 +1446,19 @@ export default function App() {
         {panels.layers.open && (
           <LayerControls
             chrome={chromeFor("layers")}
+            regionLabel={regionById(regionId)?.label ?? null}
+            viewportBounds={viewport.bounds}
+            counts={eyeCounts}
+            onGoTo={goTo}
+            railOpen={{
+              incidents: panels.incidents.open,
+              fire: panels.wildfires.open,
+              ferry: panels.ferries.open,
+            }}
+            onOpenRail={(k) => {
+              const id = k === "incidents" ? "incidents" : k === "fire" ? "wildfires" : "ferries";
+              openRail(id, !panels[id].open);
+            }}
             showVessels={showVessels}
             onToggleVessels={setShowVessels}
             showTrails={showTrails}
@@ -1350,18 +1476,16 @@ export default function App() {
             airAvailable={airAvailable}
             showFire={showFire}
             onToggleFire={(v) => {
-              if (v) focusFireView();
-              else {
-                setShowFire(false);
-                setOpen("wildfires", false);
-                setSelectedFireId(null);
-              }
+              // Show/hide only — never flies. The rail's "→ Iberia" link travels.
+              setShowFire(v);
+              openRail("wildfires", v);
+              if (!v) setSelectedFireId(null);
             }}
             fireAvailable={fireAvailable}
             showFerry={showFerry}
             onToggleFerry={(v) => {
               setShowFerry(v);
-              setOpen("ferries", v);
+              openRail("ferries", v);
               if (!v) setSelectedFerryId(null);
             }}
             ferryAvailable={ferryAvailable}
@@ -1369,20 +1493,19 @@ export default function App() {
             onToggleHazards={setShowHazards}
             hazardAvailable={hazardAvailable}
             showBus={showBus}
-            onToggleBus={setShowBus} // no London auto-fly: buses now span Ember coaches Scotland-wide
+            onToggleBus={setShowBus}
             showTrain={showTrain}
             onToggleTrain={setShowTrain}
             trainAvailable={trainAvailable}
             showTube={showTube}
-            onToggleTube={toggleLondonLayer(setShowTube)}
+            onToggleTube={setShowTube}
             tubeAvailable={tubeAvailable}
             showIncidents={showIncidents}
             onToggleIncidents={(v) => {
-              toggleLondonLayer(setShowIncidents)(v);
-              setOpen("incidents", v); // pins + the rail open/close together
+              setShowIncidents(v);
+              openRail("incidents", v); // pins + the rail open/close together
             }}
             incidentsAvailable={incidentsAvailable}
-            onEnterArgusLondon={incidentsAvailable ? enterArgusLondon : undefined}
             onOpenRailPulse={() => {
               if (panels.railpulse.open) setOpen("railpulse", false);
               else { setOpen("railpulse", true); autoPlace("railpulse"); focus("railpulse"); }
@@ -1395,7 +1518,7 @@ export default function App() {
             }}
             busAvailable={busAvailable}
             showCameras={showCameras}
-            onToggleCameras={toggleLondonLayer(setShowCameras)}
+            onToggleCameras={setShowCameras}
             camerasAvailable={camerasAvailable}
             onOpenWall={() => wall.setOpen(true)}
             wallCount={wall.ids.length}
@@ -1409,7 +1532,6 @@ export default function App() {
               setIs3D(on);
               mapRef.current?.setCinematic(on);
             }}
-            onJump={handleJump}
           />
         )}
         {panels.detail.open && selected && (
@@ -1628,6 +1750,7 @@ export default function App() {
           <IncidentsPanel
             chrome={chromeFor("incidents")}
             incidents={allIncidents}
+            region={regionById(regionId)}
             onFocus={focusIncident}
           />
         )}

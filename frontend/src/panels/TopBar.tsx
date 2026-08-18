@@ -14,9 +14,12 @@ import {
   Bell,
   Sun,
   Moon,
+  MoreHorizontal,
   type LucideIcon,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { RegionPicker } from "@/panels/RegionPicker";
+import type { RegionId } from "@/lib/regions";
 import { Separator } from "@/components/ui/separator";
 import { Hint } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -32,6 +35,8 @@ export type IslandPanel = "search" | "filters" | "alerts";
 
 interface TopBarProps {
   status: ConnectionStatus;
+  regionId: RegionId | null;
+  onEnterRegion: (id: RegionId) => void;
   total: number;
   visible: number;
   viewers: number; // people watching live right now (connected WS clients)
@@ -58,12 +63,17 @@ const STATUS_META: Record<
   closed: { label: "Offline", dot: "bg-rose-500", icon: WifiOff },
 };
 
+// The dock is deliberately short — Eyes and the Analyst are the two things
+// you reach for constantly; the rest sit one click away under "More" so the
+// bar reads calm. (Mobile lists everything in its menu sheet.)
 const DOCK: { id: PanelId; icon: LucideIcon; label: string }[] = [
+  { id: "layers", icon: Layers, label: "Eyes" },
+  { id: "analyst", icon: Sparkles, label: "AI Analyst" },
+];
+const MORE: { id: PanelId; icon: LucideIcon; label: string }[] = [
   { id: "stats", icon: Activity, label: "Statistics" },
-  { id: "layers", icon: Layers, label: "Layers & regions" },
   { id: "zones", icon: Hexagon, label: "Zones & geofences" },
   { id: "detail", icon: Ship, label: "Vessel details" },
-  { id: "analyst", icon: Sparkles, label: "AI Analyst" },
 ];
 
 /** One tappable row in the mobile menu sheet. */
@@ -102,6 +112,8 @@ function MenuRow({
 
 export function TopBar({
   status,
+  regionId,
+  onEnterRegion,
   total,
   visible,
   viewers,
@@ -122,6 +134,16 @@ export function TopBar({
   const StatusIcon = meta.icon;
   const { sheetLayout } = useViewport();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!moreOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (!moreRef.current?.contains(e.target as Node)) setMoreOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [moreOpen]);
 
   // ---- Mobile / iPad-portrait: a compact bar + a menu sheet -----------------
   // The desktop bar is a wide fixed pill that overflows a phone; here the brand
@@ -140,17 +162,11 @@ export function TopBar({
           <div className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-primary/15 text-primary">
             <Eye className="h-4 w-4" />
           </div>
+          <RegionPicker regionId={regionId} onEnterRegion={onEnterRegion} compact sheet />
           <span className={cn("h-2 w-2 shrink-0 rounded-full", meta.dot)} />
           <span className="text-xs tabular-nums">
             <span className="font-semibold text-foreground">{visible.toLocaleString()}</span>
-            <span className="text-muted-foreground">/{total.toLocaleString()}</span>
           </span>
-          {viewers > 0 && (
-            <span className="flex items-center gap-1 rounded-md bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-primary">
-              <Eye className="h-3 w-3" />
-              {viewers}
-            </span>
-          )}
           <div className="ml-auto flex items-center gap-1">
             <button
               aria-label="Search"
@@ -176,7 +192,7 @@ export function TopBar({
           <Sheet title="Menu" icon={Layers} onClose={() => setMenuOpen(false)}>
             <div className="flex flex-col gap-0.5 p-2">
               <MenuRow icon={SlidersHorizontal} label="Filters" active={island === "filters"} dot={filtersActive} onClick={run(() => onToggleIsland("filters"))} />
-              {DOCK.map((d) => {
+              {[...DOCK, ...MORE].map((d) => {
                 const disabled = d.id === "detail" && !hasSelection;
                 return (
                   <MenuRow
@@ -225,6 +241,9 @@ export function TopBar({
       </div>
 
       <Separator orientation="vertical" className="h-7" />
+
+      {/* Place — the front door. The only control here that flies the map. */}
+      <RegionPicker regionId={regionId} onEnterRegion={onEnterRegion} />
 
       {/* Global search — opens the island search dropdown (⌘K) */}
       <button
@@ -286,25 +305,6 @@ export function TopBar({
 
       {/* Panel dock — reopen / toggle floating panels */}
       <div className="flex items-center gap-0.5 pr-0.5">
-        {/* Filters — island dropdown */}
-        <Hint label="Filters" side="bottom">
-          <button
-            aria-label="Filters"
-            onClick={() => onToggleIsland("filters")}
-            className={cn(
-              "relative grid h-8 w-8 place-items-center rounded-lg transition-colors",
-              island === "filters"
-                ? "bg-primary/15 text-primary"
-                : "text-muted-foreground hover:bg-foreground/10 hover:text-foreground",
-            )}
-          >
-            <SlidersHorizontal className="h-4 w-4" />
-            {filtersActive && (
-              <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-primary" />
-            )}
-          </button>
-        </Hint>
-
         {DOCK.map((d) => {
           const disabled = d.id === "detail" && !hasSelection;
           const active = panelOpen[d.id] && !disabled;
@@ -333,24 +333,6 @@ export function TopBar({
           );
         })}
 
-        <Separator orientation="vertical" className="mx-0.5 h-7" />
-
-        {/* Vessels table */}
-        <Hint label="Vessels table" side="bottom">
-          <button
-            aria-label="Vessels table"
-            onClick={() => onOpenData("vessels")}
-            className={cn(
-              "grid h-8 w-8 place-items-center rounded-lg transition-colors",
-              dataTab === "vessels"
-                ? "bg-primary/15 text-primary"
-                : "text-muted-foreground hover:bg-foreground/10 hover:text-foreground",
-            )}
-          >
-            <Table2 className="h-4 w-4" />
-          </button>
-        </Hint>
-
         {/* Alerts — recent-events island dropdown */}
         <Hint label="Recent alerts" side="bottom">
           <button
@@ -369,6 +351,68 @@ export function TopBar({
             )}
           </button>
         </Hint>
+
+        {/* More — filters, statistics, zones, vessel details, vessels table */}
+        <div ref={moreRef} className="relative">
+          <Hint label="More tools" side="bottom">
+            <button
+              aria-label="More tools"
+              aria-expanded={moreOpen}
+              onClick={() => setMoreOpen((o) => !o)}
+              className={cn(
+                "relative grid h-8 w-8 place-items-center rounded-lg transition-colors",
+                moreOpen || MORE.some((m) => panelOpen[m.id]) || dataTab === "vessels" || filtersActive
+                  ? "bg-primary/15 text-primary"
+                  : "text-muted-foreground hover:bg-foreground/10 hover:text-foreground",
+              )}
+            >
+              <MoreHorizontal className="h-4 w-4" />
+              {filtersActive && (
+                <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-primary" />
+              )}
+            </button>
+          </Hint>
+          {moreOpen && (
+            <div className="glass absolute right-0 top-10 z-50 w-56 overflow-hidden rounded-xl border border-border/60 p-1 shadow-2xl animate-fade-in">
+              <MenuRow
+                icon={SlidersHorizontal}
+                label="Filters"
+                active={island === "filters"}
+                dot={filtersActive}
+                onClick={() => {
+                  setMoreOpen(false);
+                  onToggleIsland("filters");
+                }}
+              />
+              {MORE.map((d) => {
+                const disabled = d.id === "detail" && !hasSelection;
+                return (
+                  <MenuRow
+                    key={d.id}
+                    icon={d.icon}
+                    label={d.label}
+                    active={panelOpen[d.id] && !disabled}
+                    disabled={disabled}
+                    onClick={() => {
+                      if (disabled) return;
+                      setMoreOpen(false);
+                      onTogglePanel(d.id);
+                    }}
+                  />
+                );
+              })}
+              <MenuRow
+                icon={Table2}
+                label="Vessels table"
+                active={dataTab === "vessels"}
+                onClick={() => {
+                  setMoreOpen(false);
+                  onOpenData("vessels");
+                }}
+              />
+            </div>
+          )}
+        </div>
 
         <Separator orientation="vertical" className="mx-0.5 h-7" />
 

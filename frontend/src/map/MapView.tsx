@@ -113,6 +113,9 @@ interface MapViewProps {
   onReplayAlertClick: (a: Alert) => void;
   /** Debounced viewport bounds while replaying, so tracks follow pan/zoom. */
   onReplayViewportChange: (bbox: [number, number, number, number]) => void;
+  /** Debounced viewport report (bounds + zoom) for viewport-aware UI — the
+   *  Eyes rail's in-view counts and the region picker's "Custom view". */
+  onViewportChange?: (bbox: [number, number, number, number], zoom: number) => void;
   theme: "light" | "dark";
   highlightTrack: [number, number, number][] | null;
   highlightColor: [number, number, number];
@@ -195,10 +198,13 @@ interface MapViewProps {
   nextCameraPos: [number, number] | null;
 }
 
+// Great Britain — the default front door (see lib/regions.ts). Phones show a
+// narrower slice at the same zoom, so back off a little to keep all of GB in.
+const NARROW = typeof window !== "undefined" && window.innerWidth <= 640;
 const INITIAL_VIEW = {
-  longitude: -2.5,
-  latitude: 50.2,
-  zoom: 7,
+  longitude: -2.8,
+  latitude: 54.7,
+  zoom: NARROW ? 4.7 : 5.5,
   pitch: 0,
   bearing: 0,
   maxPitch: 79, // raised ceiling so the 3D view can tilt toward the horizon
@@ -226,6 +232,7 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
     onReplaySelect,
     onReplayAlertClick,
     onReplayViewportChange,
+    onViewportChange,
     theme,
     highlightTrack,
     highlightColor,
@@ -382,6 +389,16 @@ function MapViewInner(props: MapViewProps, ref: Ref<MapHandle>) {
     );
     return () => clearTimeout(id);
   }, [replayMode, viewState, onReplayViewportChange]);
+
+  // Viewport-aware chrome: report bounds + zoom 250 ms after movement settles.
+  useEffect(() => {
+    if (!onViewportChange) return;
+    const id = setTimeout(
+      () => onViewportChange(boundsFromViewState(viewState), (viewState.zoom as number) ?? 7),
+      250,
+    );
+    return () => clearTimeout(id);
+  }, [viewState, onViewportChange]);
 
   useImperativeHandle(ref, () => ({
     flyTo: (t) =>
